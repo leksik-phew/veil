@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { initDatabase } from '../src/db/database';
 import { useVeilStore } from '../src/store/useStore';
 
@@ -29,39 +30,44 @@ export default function RootLayout() {
 
   if (appState === 'loading') {
     return (
-      <View style={s.center}>
+      <GestureHandlerRootView style={s.root}>
         <StatusBar style="light" />
-        <Text style={s.logo}>◎</Text>
-        <Text style={s.appName}>veil</Text>
-        <ActivityIndicator color="#8b7cf8" style={{ marginTop: 32 }} />
-      </View>
+        <View style={s.center}>
+          <Text style={s.logo}>◎</Text>
+          <Text style={s.appName}>veil</Text>
+          <ActivityIndicator color="#8b7cf8" style={{ marginTop: 32 }} />
+        </View>
+      </GestureHandlerRootView>
     );
   }
 
   if (appState === 'error') {
     return (
-      <View style={s.center}>
+      <GestureHandlerRootView style={s.root}>
         <StatusBar style="light" />
-        <Text style={s.errorIcon}>⚠</Text>
-        <Text style={s.errorTitle}>Something went wrong</Text>
-        <Text style={s.errorMsg}>{errorMsg}</Text>
-        <TouchableOpacity onPress={init} style={s.retryBtn} activeOpacity={0.8}>
-          <Text style={s.retryText}>Try again</Text>
-        </TouchableOpacity>
-      </View>
+        <View style={s.center}>
+          <Text style={s.errorIcon}>⚠</Text>
+          <Text style={s.errorTitle}>Something went wrong</Text>
+          <Text style={s.errorMsg}>{errorMsg}</Text>
+          <TouchableOpacity onPress={init} style={s.retryBtn} activeOpacity={0.8}>
+            <Text style={s.retryText}>Try again</Text>
+          </TouchableOpacity>
+        </View>
+      </GestureHandlerRootView>
     );
   }
 
   return (
-    <>
+    <GestureHandlerRootView style={s.root}>
       <StatusBar style="light" />
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#0d0b14' } }} />
-    </>
+    </GestureHandlerRootView>
   );
 }
 
 const s = StyleSheet.create({
-  center:    { flex: 1, backgroundColor: '#0d0b14', alignItems: 'center', justifyContent: 'center' },
+  root:      { flex: 1, backgroundColor: '#0d0b14' },
+  center:    { flex: 1, alignItems: 'center', justifyContent: 'center' },
   logo:      { fontSize: 48, color: '#8b7cf8' },
   appName:   { fontSize: 22, fontWeight: '300', color: 'rgba(255,255,255,0.6)', letterSpacing: 6, marginTop: 12 },
   errorIcon: { fontSize: 40, color: '#FF6B6B', marginBottom: 16 },
