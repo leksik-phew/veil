@@ -12,8 +12,9 @@ type Phase = 'idle' | 'recording' | 'processing' | 'done';
 export default function VoiceScreen() {
   const { voiceEntries, addVoiceEntry } = useVeilStore(s => ({ voiceEntries: s.voiceEntries, addVoiceEntry: s.addVoiceEntry }));
   const [phase, setPhase]   = useState<Phase>('idle');
-  const [secs, setSecs]     = useState(0);
-  const [result, setResult] = useState<{ emotion: EmotionId; confidence: number; features: AudioFeatures; desc: string } | null>(null);
+  const [secs, setSecs]       = useState(0);
+  const [waveBars, setWaveBars] = useState<number[]>([]);
+  const [result, setResult]     = useState<{ emotion: EmotionId; confidence: number; features: AudioFeatures; desc: string } | null>(null);
   const recRef     = useRef<Audio.Recording | null>(null);
   const timerRef   = useRef<ReturnType<typeof setInterval> | null>(null);
   const samplesRef = useRef<number[]>([]);
@@ -26,12 +27,16 @@ export default function VoiceScreen() {
       const { recording } = await Audio.Recording.createAsync({ ...Audio.RecordingOptionsPresets.HIGH_QUALITY, isMeteringEnabled: true });
       recRef.current = recording;
       samplesRef.current = [];
-      setPhase('recording'); setSecs(0); setResult(null);
+      setPhase('recording'); setSecs(0); setResult(null); setWaveBars([]);
       timerRef.current = setInterval(async () => {
         setSecs(s => s + 0.1);
         const st = await recording.getStatusAsync();
-        if (st.isRecording && st.metering !== undefined)
-          samplesRef.current.push(dbToAmplitude(st.metering));
+        if (st.isRecording && st.metering !== undefined) {
+          const amp = dbToAmplitude(st.metering);
+          samplesRef.current.push(amp);
+          // Keep last 24 bars for display
+          setWaveBars(prev => [...prev.slice(-23), amp]);
+        }
       }, 100);
     } catch (e) { Alert.alert('Error', 'Could not start recording.'); }
   };
@@ -76,7 +81,18 @@ export default function VoiceScreen() {
 
           {phase === 'recording' && (
             <><View style={s.recRow}><View style={s.recDot} /><Text style={s.recTime}>{secStr}</Text></View>
-            <View style={s.wave}>{samplesRef.current.slice(-20).map((a, i) => <View key={i} style={[s.waveBar, { height: Math.max(4, a * 36) }]} />)}</View></>
+            <View style={s.wave}>
+              {(waveBars.length > 0 ? waveBars : Array(20).fill(0.1)).map((a, i) => (
+                <View key={i} style={[
+                  s.waveBar,
+                  {
+                    height: Math.max(4, a * 36),
+                    opacity: 0.4 + (i / 24) * 0.6,
+                    backgroundColor: COLORS.accent,
+                  }
+                ]} />
+              ))}
+            </View></>
           )}
           {phase === 'idle'       && <Text style={s.hint}>tap to start recording</Text>}
           {phase === 'processing' && <Text style={s.hint}>analyzing your voice...</Text>}

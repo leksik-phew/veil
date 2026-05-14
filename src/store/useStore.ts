@@ -14,6 +14,7 @@ interface VeilStore {
   voiceEntries: VoiceEntry[];
   stats:        WeeklyStats | null;
   moodChart:    { day: string; avg: number }[];
+  heatmapData:  { day: string; avg: number }[]; // 70 days for calendar heatmap
   loading:      boolean;
   loadAll:       () => Promise<void>;
   addCheckIn:    (emotion: EmotionId, intensity: number, triggers: TriggerId[], note: string) => Promise<void>;
@@ -24,7 +25,7 @@ type Listener = () => void;
 const listeners = new Set<Listener>();
 
 let state: VeilStore = {
-  checkIns: [], voiceEntries: [], stats: null, moodChart: [], loading: false,
+  checkIns: [], voiceEntries: [], stats: null, moodChart: [], heatmapData: [], loading: false,
   loadAll: async () => {}, addCheckIn: async () => {}, addVoiceEntry: async () => {},
 };
 
@@ -36,10 +37,11 @@ function setState(patch: Partial<VeilStore>) {
 Object.assign(state, {
   loadAll: async () => {
     setState({ loading: true });
-    const [checkIns, voiceEntries, stats, moodChart] = await Promise.all([
-      fetchCheckIns(50), fetchVoiceEntries(20), computeWeeklyStats(), fetchDailyMood(14),
+    const [checkIns, voiceEntries, stats, moodChart, heatmapData] = await Promise.all([
+      fetchCheckIns(200), fetchVoiceEntries(20), computeWeeklyStats(),
+      fetchDailyMood(14), fetchDailyMood(70),
     ]);
-    setState({ checkIns, voiceEntries, stats, moodChart, loading: false });
+    setState({ checkIns, voiceEntries, stats, moodChart, heatmapData, loading: false });
   },
   addCheckIn: async (emotion: EmotionId, intensity: number, triggers: TriggerId[], note: string) => {
     await insertCheckIn(emotion, intensity, triggers, note);
