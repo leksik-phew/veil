@@ -9,7 +9,9 @@ import { useVeilStore } from '../src/store/useStore';
 type AppState = 'loading' | 'ready' | 'error';
 
 export default function RootLayout() {
-  const loadAll = useVeilStore(s => s.loadAll);
+  const { loadAll, theme, themeMode } = useVeilStore(s => ({
+    loadAll: s.loadAll, theme: s.theme, themeMode: s.themeMode,
+  }));
   const [appState, setAppState] = useState<AppState>('loading');
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -49,13 +51,13 @@ export default function RootLayout() {
 
   if (appState === 'loading') {
     return (
-      <GestureHandlerRootView style={s.root}>
-        <StatusBar style="light" />
+      <GestureHandlerRootView style={[s.root, { backgroundColor: theme.bg }]}>
+        <StatusBar style={themeMode === 'light' ? 'dark' : 'light'} />
         <View style={s.center}>
-          <Animated.Text style={[s.logo, { opacity: pulse, transform: [{ translateY: logoY }] }]}>
+          <Animated.Text style={[s.logo, { color: theme.accent, opacity: pulse, transform: [{ translateY: logoY }] }]}>
             ◎
           </Animated.Text>
-          <Animated.Text style={[s.appName, { transform: [{ translateY: logoY }] }]}>
+          <Animated.Text style={[s.appName, { color: theme.textMuted, transform: [{ translateY: logoY }] }]}>
             veil
           </Animated.Text>
         </View>
@@ -65,13 +67,13 @@ export default function RootLayout() {
 
   if (appState === 'error') {
     return (
-      <GestureHandlerRootView style={s.root}>
-        <StatusBar style="light" />
+      <GestureHandlerRootView style={[s.root, { backgroundColor: theme.bg }]}>
+        <StatusBar style={themeMode === 'light' ? 'dark' : 'light'} />
         <View style={s.center}>
           <Text style={s.errorIcon}>⚠</Text>
-          <Text style={s.errorTitle}>Something went wrong</Text>
-          <Text style={s.errorMsg}>{errorMsg}</Text>
-          <TouchableOpacity onPress={init} style={s.retryBtn} activeOpacity={0.8}>
+          <Text style={[s.errorTitle, { color: theme.text }]}>Something went wrong</Text>
+          <Text style={[s.errorMsg, { color: theme.textMuted }]}>{errorMsg}</Text>
+          <TouchableOpacity onPress={init} style={[s.retryBtn, { backgroundColor: theme.accent }]} activeOpacity={0.8}>
             <Text style={s.retryText}>Try again</Text>
           </TouchableOpacity>
         </View>
@@ -80,9 +82,9 @@ export default function RootLayout() {
   }
 
   return (
-    <GestureHandlerRootView style={s.root}>
-      <StatusBar style="light" />
-      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#0d0b14' } }} />
+    <GestureHandlerRootView style={[s.root, { backgroundColor: theme.bg }]}>
+      <StatusBar style={themeMode === 'light' ? 'dark' : 'light'} />
+      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.bg } }} />
     </GestureHandlerRootView>
   );
 }

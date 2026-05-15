@@ -1,5 +1,5 @@
 import { getDb } from './database';
-import type { CheckIn, VoiceEntry, EmotionId, TriggerId, WeeklyStats, AudioFeatures } from '../types';
+import type { CheckIn, VoiceEntry, EmotionId, TriggerId, WeeklyStats, AudioFeatures, ThemeMode } from '../types';
 
 export async function insertCheckIn(
   emotion: EmotionId, intensity: number, triggers: TriggerId[], note: string,
@@ -74,6 +74,38 @@ export async function fetchVoiceEntries(limit = 20): Promise<VoiceEntry[]> {
     modelVersion: r.model_version ?? 'legacy',
     durationSeconds: r.duration_seconds, createdAt: r.created_at,
   }));
+}
+
+export async function clearCheckIns(): Promise<void> {
+  await getDb().runAsync(`DELETE FROM checkins`);
+}
+
+export async function clearVoiceEntries(): Promise<void> {
+  await getDb().runAsync(`DELETE FROM voice_entries`);
+}
+
+export async function clearAllData(): Promise<void> {
+  const db = getDb();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(`DELETE FROM checkins`);
+    await db.runAsync(`DELETE FROM voice_entries`);
+  });
+}
+
+export async function fetchThemeMode(): Promise<ThemeMode> {
+  const row = await getDb().getFirstAsync<{ value: string }>(
+    `SELECT value FROM app_settings WHERE key = 'theme_mode'`,
+  );
+  return row?.value === 'light' ? 'light' : 'dark';
+}
+
+export async function saveThemeMode(mode: ThemeMode): Promise<void> {
+  await getDb().runAsync(
+    `INSERT INTO app_settings (key, value, updated_at)
+     VALUES ('theme_mode', ?, datetime('now','localtime'))
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    mode,
+  );
 }
 
 export async function computeWeeklyStats(): Promise<WeeklyStats> {

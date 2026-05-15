@@ -35,6 +35,12 @@ export async function initDatabase(): Promise<void> {
       created_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
     );
 
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key        TEXT PRIMARY KEY,
+      value      TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+    );
+
     CREATE INDEX IF NOT EXISTS idx_checkins_created ON checkins(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_voice_created    ON voice_entries(created_at DESC);
   `);

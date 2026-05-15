@@ -1,13 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import {
+  clearAllData,
+  clearCheckIns,
+  clearVoiceEntries,
   computeWeeklyStats,
   fetchCheckIns,
   fetchDailyMood,
+  fetchThemeMode,
   fetchVoiceEntries,
   insertCheckIn,
   insertVoiceEntry,
+  saveThemeMode,
 } from '../db/queries';
-import type { AudioFeatures, CheckIn, EmotionId, TriggerId, VoiceEntry, WeeklyStats } from '../types';
+import { getThemeColors, type ThemeColors } from '../constants/emotions';
+import type { AudioFeatures, CheckIn, EmotionId, ThemeMode, TriggerId, VoiceEntry, WeeklyStats } from '../types';
 
 interface VeilStore {
   checkIns:     CheckIn[];
@@ -15,8 +21,11 @@ interface VeilStore {
   stats:        WeeklyStats | null;
   moodChart:    { day: string; avg: number }[];
   heatmapData:  { day: string; avg: number }[]; // 70 days for calendar heatmap
+  themeMode:    ThemeMode;
+  theme:        ThemeColors;
   loading:      boolean;
   loadAll:       () => Promise<void>;
+  setThemeMode:  (mode: ThemeMode) => void;
   addCheckIn:    (emotion: EmotionId, intensity: number, triggers: TriggerId[], note: string) => Promise<void>;
   addVoiceEntry: (
     audioPath: string,
@@ -27,14 +36,20 @@ interface VeilStore {
     duration: number,
     modelVersion: string,
   ) => Promise<void>;
+  resetCheckIns:     () => Promise<void>;
+  resetVoiceEntries: () => Promise<void>;
+  resetAllData:      () => Promise<void>;
 }
 
 type Listener = () => void;
 const listeners = new Set<Listener>();
 
 let state: VeilStore = {
-  checkIns: [], voiceEntries: [], stats: null, moodChart: [], heatmapData: [], loading: false,
-  loadAll: async () => {}, addCheckIn: async () => {}, addVoiceEntry: async () => {},
+  checkIns: [], voiceEntries: [], stats: null, moodChart: [], heatmapData: [],
+  themeMode: 'dark', theme: getThemeColors('dark'), loading: false,
+  loadAll: async () => {}, setThemeMode: () => {},
+  addCheckIn: async () => {}, addVoiceEntry: async () => {},
+  resetCheckIns: async () => {}, resetVoiceEntries: async () => {}, resetAllData: async () => {},
 };
 
 function setState(patch: Partial<VeilStore>) {
@@ -43,13 +58,20 @@ function setState(patch: Partial<VeilStore>) {
 }
 
 Object.assign(state, {
+  setThemeMode: (mode: ThemeMode) => {
+    setState({ themeMode: mode, theme: getThemeColors(mode) });
+    saveThemeMode(mode).catch(e => console.warn('Could not save theme mode:', e));
+  },
   loadAll: async () => {
     setState({ loading: true });
-    const [checkIns, voiceEntries, stats, moodChart, heatmapData] = await Promise.all([
+    const [checkIns, voiceEntries, stats, moodChart, heatmapData, themeMode] = await Promise.all([
       fetchCheckIns(200), fetchVoiceEntries(20), computeWeeklyStats(),
-      fetchDailyMood(14), fetchDailyMood(70),
+      fetchDailyMood(14), fetchDailyMood(70), fetchThemeMode(),
     ]);
-    setState({ checkIns, voiceEntries, stats, moodChart, heatmapData, loading: false });
+    setState({
+      checkIns, voiceEntries, stats, moodChart, heatmapData,
+      themeMode, theme: getThemeColors(themeMode), loading: false,
+    });
   },
   addCheckIn: async (emotion: EmotionId, intensity: number, triggers: TriggerId[], note: string) => {
     await insertCheckIn(emotion, intensity, triggers, note);
@@ -65,6 +87,18 @@ Object.assign(state, {
     modelVersion: string,
   ) => {
     await insertVoiceEntry(audioPath, emotion, modelEmotion, confidence, features, duration, modelVersion);
+    await state.loadAll();
+  },
+  resetCheckIns: async () => {
+    await clearCheckIns();
+    await state.loadAll();
+  },
+  resetVoiceEntries: async () => {
+    await clearVoiceEntries();
+    await state.loadAll();
+  },
+  resetAllData: async () => {
+    await clearAllData();
     await state.loadAll();
   },
 });

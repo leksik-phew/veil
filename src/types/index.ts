@@ -13,6 +13,8 @@ export type TriggerId =
   | 'work' | 'relationships' | 'sleep' | 'health'
   | 'exercise' | 'money' | 'loneliness' | 'success';
 
+export type ThemeMode = 'dark' | 'light';
+
 export interface CheckIn {
   id: number;
   emotion: EmotionId;

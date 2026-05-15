@@ -1,7 +1,7 @@
 # Veil — Emotion Tracking App
 
-> **Lift the veil. Understand yourself.**  
-> A fully offline, privacy-first mobile app for tracking emotions, building self-awareness, and spotting patterns in your mental state over time.
+> **Lift the veil. Understand yourself.**
+> A fully offline, privacy-first mobile application for iOS and Android that tracks emotions through daily check-ins, voice journaling, and breathing exercises — and surfaces personal patterns using two bundled on-device ML models.
 
 ---
 
@@ -13,110 +13,121 @@
 4. [Tech Stack](#tech-stack)
 5. [Project Structure](#project-structure)
 6. [Architecture](#architecture)
-7. [Emotion Engine](#emotion-engine)
+7. [ML Models](#ml-models)
+   - [Audio Emotion Classifier](#audio-emotion-classifier-veil-audio-prototype-net-v2)
+   - [Pattern Model](#pattern-model-veil-pattern-bayes-net-v2)
 8. [Database Schema](#database-schema)
 9. [State Management](#state-management)
-10. [Screens](#screens)
-11. [Getting Started](#getting-started)
-12. [Build & Deploy](#build--deploy)
-13. [Design System](#design-system)
-14. [Roadmap](#roadmap)
+10. [Animation System](#animation-system)
+11. [Theme System](#theme-system)
+12. [Screens](#screens)
+13. [Getting Started](#getting-started)
+14. [Build & Deploy](#build--deploy)
+15. [Design System](#design-system)
+16. [Roadmap](#roadmap)
+17. [Privacy](#privacy)
 
 ---
 
 ## Overview
 
-Veil is a React Native (Expo) mobile application for iOS and Android that helps users track their emotional state through daily check-ins, voice journaling, and guided breathing exercises. It surfaces patterns over time — ML-scored trigger/emotion patterns, weekly mood calendars, and day-of-week insights — entirely on-device without sending a single byte to any server.
+Veil is a React Native (Expo) application that helps users track and understand their emotional state. It combines manual check-ins with acoustic voice analysis, breathing exercises, and ML-driven pattern recognition — all running entirely on-device. No accounts, no network requests, no cloud.
 
-The name is intentional: emotions are often the veil that obscures our real state from ourselves. The app exists to help lift it.
+The core loop: check in → journal by voice → see patterns emerge → breathe when needed.
 
 ---
 
 ## Core Philosophy
 
 ### Privacy-first by design
-All user data lives exclusively in an SQLite database on the device. Audio recordings are stored in the local filesystem. There are no accounts, no cloud sync, no analytics, no third-party SDKs. The app works with no internet connection at all.
+All user data lives in a SQLite database on the device. Audio recordings stay in the local filesystem sandbox. The app opens zero network connections. Uninstalling removes everything.
 
-### On-device ML, no network
-Emotion detection runs through a bundled local neural model (`src/engine/localEmotionModel.ts`) written in plain TypeScript. It requires no network calls, no TensorFlow, and no ONNX runtime. Patterns are scored by a second local model (`src/engine/patternModel.ts`) that learns from the user's own check-in history on the device.
+### Two bundled ML models, zero external dependencies
+Both the audio emotion classifier (`localEmotionModel.ts`) and the pattern detector (`patternModel.ts`) are hand-crafted TypeScript models with embedded weights. No TensorFlow, no ONNX, no model downloads. Classification happens synchronously on the JS thread in under 1ms.
 
 ### No state management library
-The global store (`src/store/useStore.ts`) is implemented from scratch using React's `useState` and `useEffect`. It provides a Zustand-like selector API without any external dependency — and without `import.meta`, which is incompatible with Hermes (React Native's JS engine).
+The global store (`useStore.ts`) is implemented from scratch using React hooks. It provides a selector API identical to Zustand without `import.meta`, which is incompatible with Hermes. No external dependency, no build-time issues.
+
+### Full theme support
+Every color in the app is token-driven. The user can switch between dark and light mode from Settings; the preference is persisted to SQLite and applied immediately across all screens and components including the SVG PlutchikWheel.
 
 ---
 
 ## Features
 
 ### ◎ Check-in (2-step flow)
-A guided daily check-in that takes under 30 seconds.
-
 **Step 1 — Emotion + Intensity**
-- Interactive Plutchik Wheel built with `react-native-svg`. Tap or slide a finger around the ring to select one of 8 emotions (joy, trust, fear, surprise, sadness, disgust, anger, anticipation).
-- Custom intensity slider built with `react-native-reanimated` + `react-native-gesture-handler`. The thumb and fill run entirely on the UI thread (zero JS bridge crossings during drag). Springs to the nearest integer step on release.
-- Weekly digest card appears automatically when ≥2 check-ins exist in the current week, showing average mood, check-in count, most-felt emotion, and hardest day.
+- **Plutchik Wheel** built with `react-native-svg`. Supports two interaction modes simultaneously: tap a sector to select, or slide a finger around the ring to sweep through emotions. Internally, the gesture handler distinguishes taps from drags by tracking total translation distance — below 8px is a tap (uses `beginEid`), above is a drag (uses live `emotionAtPoint`). Both modes highlight the sector in real time and show a radial gradient glow in the centre. The centre fill and label colours adapt to the active theme.
+- **Intensity slider** built with Reanimated + Gesture Handler. The thumb, fill bar, and floating badge all animate on the UI thread (zero JS bridge crossings during drag). Snaps to the nearest integer step with a spring on release. Syncs position via `withSpring` when the value changes externally (e.g. after save+reset).
+- **Weekly Digest** — a compact stats row that appears automatically when ≥2 check-ins exist in the current week: check-in count, average mood, most-felt emotion.
 
 **Step 2 — Context**
-- 8 predefined trigger chips: work, relationships, sleep, health, exercise, money, loneliness, success.
-- **"other +"** chip opens an inline text input for a custom trigger description (saved as a `#hashtag` prefix in the note field).
+- 8 predefined trigger chips with spring press animations.
+- **"other +"** chip opens an inline `TextInput` that slides down via Reanimated `withSpring`. The custom trigger is stored as a `#hashtag` prefix in the note field.
 - Free-text note field.
+- Step transitions use RN `Animated.timing` fade (130ms out → swap content → 200ms in), chosen over Reanimated to avoid gesture conflicts.
 
 ### ◈ Journal
-A scrollable history of all check-ins. Each entry card shows the emotion (color-coded), trigger tags, note preview, timestamp, and an intensity bar. FlatList with a fixed header — the header never scrolls away.
+Scrollable check-in history. Fixed header with entry count badge. `FlatList` fills the remaining space — only the list scrolls, not the screen. Each `EntryCard` has a spring press animation via Reanimated.
 
 ### ◉ Patterns
-A data dashboard with three sections:
+Scrollable analytics dashboard combining data from both check-ins and confirmed voice entries:
 
-**Mood Calendar (heatmap)**  
-A 10-week × 7-day GitHub-style contribution graph. Each cell is colored by average intensity for that day: grey = no data, red gradient = low mood (1–4), purple gradient = neutral to excellent (5–10). Built entirely from React Native `View` components — no charting library required.
+**Mood Calendar (heatmap)**
+A 10-week × 7-day GitHub-style grid. Each cell is coloured by average intensity for that day using the theme accent colour as the positive end. Built from plain RN `View` components — no charting library.
 
-**Veil Notices (insight callout)**  
-Appears automatically when ≥5 check-ins exist. Finds the day of the week with the lowest average intensity vs the highest, and generates a human-readable sentence: *"Mondays tend to be harder — mood is 34% lower than on Fridays."*
+**Veil Notices**
+Appears automatically at ≥5 entries. Finds the day of week with the lowest vs highest average intensity and generates a human-readable sentence from real data.
 
-**ML Patterns**  
-For each trigger the user has logged, the local pattern model combines frequency, emotional lift, intensity, recency, and consistency into a neural score. Shows up to 4 top patterns, fully on-device.
+**ML Patterns**
+The `veil-pattern-bayes-net-v2` model computes patterns from the union of check-ins and voice entries. Each pattern is a trigger → emotion pair scored by statistical lift, intensity delta, recency decay, and observation reliability. Animated bars stagger in with `withDelay(i × 120ms, withTiming(..., Easing.out(Easing.cubic)))`.
 
-**Overview stats grid**  
-Four cards: total entries, current day streak, average intensity (last 7 days), top emotion.
+**Stats grid** — total entries, current streak, 7-day average intensity, top emotion across all sources.
 
 ### ◐ Voice Journal
-Full recording flow using `expo-av`:
-1. Requests microphone permission on first use.
-2. Records with `isMeteringEnabled: true` — captures amplitude every 100ms.
-3. Live animated waveform updates in real time from metering data (via `useState`, not `ref`).
-4. On stop, passes amplitude samples through the local neural emotion model.
-5. Shows the model prediction, confidence score, energy level, stability, and model version.
-6. Lets the user confirm or correct the emotion before saving.
-7. Saves the final emotion, original model prediction, audio path, features, and ML metadata to the `voice_entries` table.
-8. Displays the last 3 recordings below the mic.
+Full recording and analysis pipeline:
+
+1. Requests microphone permission once. Configures audio session explicitly (not via preset spread, which caused crashes on some devices).
+2. Records with `isMeteringEnabled: true`. Samples amplitude every 100ms.
+3. Live waveform: bars stored in `useState`, updated each polling tick — bars animate in real time.
+4. Mic ring pulses with `withRepeat(withSequence(up, down), -1)` — no recursive callbacks.
+5. On stop, passes samples through `extractFeatures()` → `classifyEmotionWithLocalModel()`.
+6. Result card slides in from below with `withSpring` on `opacity + translateY`.
+7. User can **correct** the detected emotion by tapping any of the 8 choice chips before saving. The original model output is preserved as `model_emotion`; the user-chosen (or confirmed) emotion is stored as `detected_emotion`.
+8. All acoustic features plus model version are persisted to `voice_entries`.
 
 ### ◌ Breathe
-A guided 4-7-8 breathing exercise:
-- **4s inhale** → **7s hold** → **8s exhale** → **2s pause** — 3 cycles.
-- Animated circle expands on inhale/hold, contracts on exhale, using `Animated.timing` from React Native core (no Reanimated needed here).
-- Phase colors: teal for inhale, yellow for hold, purple for exhale.
-- Cycle counter, stop/restart at any time.
-- Three additional practice descriptions: 5-4-3-2-1 grounding, progressive relaxation, body scan meditation.
+Guided 4-7-8 breathing: 4s inhale → 7s hold → 8s exhale → 2s pause, 3 cycles.
+
+- Ring border and inner background interpolate smoothly between 6 colours (one per phase) using `interpolateColor` in a Reanimated worklet. Colours are computed from the active theme at render time — light theme gets softer tints.
+- Inner circle scales via `withTiming(Easing.inOut(Easing.sin))`.
+- Count digit pulses on each tick: opacity 1 → 0.35 → 1 with `withTiming`.
+- Countdown timer via `setInterval` with a ref; cleaned up on unmount.
+
+### ⚙ Settings
+- **Theme toggle** — dark / light, with a mini screen preview for each. Preference saved to `app_settings` table in SQLite and loaded on boot.
+- **Data management** — separate destructive actions for clearing check-ins, voice entries, or all data, each guarded by an `Alert.alert` confirmation.
+- **About** — version, storage policy, network status (zero requests), ML model inference location.
 
 ---
 
 ## Tech Stack
 
-| Layer              | Technology                               | Version      |
-|--------------------|------------------------------------------|--------------|
-| Framework          | React Native                             | 0.81.5       |
-| Expo SDK           | Expo                                     | ~54.0.33     |
-| Navigation         | Expo Router (file-based, tabs)           | ~6.0.23      |
-| Language           | TypeScript                               | ~5.9.2       |
-| Runtime            | React                                    | 19.1.0       |
-| Database           | expo-sqlite (async API)                  | ~16.0.10     |
-| Audio              | expo-av                                  | ~16.0.8      |
-| Animations         | react-native-reanimated                  | ~4.1.1       |
-| Gestures           | react-native-gesture-handler             | ~2.28.0      |
-| Vector graphics    | react-native-svg                         | 15.12.1      |
-| State management   | Custom pub-sub hook (zero deps)          | —            |
-| Emotion classifier | Local TypeScript prototype network (zero runtime deps) | — |
-| Pattern scoring    | Local TypeScript ML model (zero runtime deps) | —       |
-| Date utilities     | date-fns                                 | ^4.1.0       |
+| Layer | Technology | Version |
+|---|---|---|
+| Framework | React Native | 0.81.5 |
+| Expo SDK | Expo | ~54.0.33 |
+| Navigation | Expo Router (file-based, tabs) | ~6.0.23 |
+| Language | TypeScript | ~5.9.2 |
+| Runtime | React | 19.1.0 |
+| Database | expo-sqlite (async WAL) | ~16.0.10 |
+| Audio | expo-av | ~16.0.8 |
+| Animations | react-native-reanimated | ~4.1.1 |
+| Gestures | react-native-gesture-handler | ~2.28.0 |
+| Vector graphics | react-native-svg | 15.12.1 |
+| State management | Custom pub-sub hook | — |
+| Audio ML model | veil-audio-prototype-net-v2 | bundled TS |
+| Pattern ML model | veil-pattern-bayes-net-v2 | bundled TS |
 
 ---
 
@@ -124,48 +135,47 @@ A guided 4-7-8 breathing exercise:
 
 ```
 veil/
-├── app/                          # Expo Router file-based navigation
-│   ├── _layout.tsx               # Root layout: DB init, loading screen, error screen
-│   └── (tabs)/                   # Tab navigator
-│       ├── _layout.tsx           # Tab bar config (icons, colors, heights)
-│       ├── index.tsx             # ◎ Check-in screen
-│       ├── journal.tsx           # ◈ Journal screen
-│       ├── insights.tsx          # ◉ Patterns screen
-│       ├── voice.tsx             # ◐ Voice journal screen
-│       └── breathe.tsx           # ◌ Breathe screen
+├── app/
+│   ├── _layout.tsx               # Root: GestureHandlerRootView, DB init, loading/error screen
+│   └── (tabs)/
+│       ├── _layout.tsx           # Tab bar with theme-aware sceneStyle, SettingsIcon
+│       ├── index.tsx             # ◎ Check-in (2-step: wheel+intensity → triggers+note)
+│       ├── journal.tsx           # ◈ Journal (FlatList, fixed header)
+│       ├── insights.tsx          # ◉ Patterns (heatmap, ML patterns, stats)
+│       ├── voice.tsx             # ◐ Voice journal (record → classify → correct → save)
+│       ├── breathe.tsx           # ◌ Breathe (4-7-8, interpolateColor phases)
+│       └── settings.tsx          # ⚙ Settings (theme, data management, about)
 │
 ├── src/
-│   ├── types/
-│   │   └── index.ts              # All TypeScript types and interfaces
+│   ├── types/index.ts            # All TS types: EmotionId, CheckIn, VoiceEntry, ThemeMode…
 │   │
-│   ├── constants/
-│   │   └── emotions.ts           # Plutchik emotions, trigger list, color palette
+│   ├── constants/emotions.ts     # EMOTIONS, TRIGGERS, DARK_COLORS, LIGHT_COLORS, getThemeColors
 │   │
 │   ├── engine/
-│   │   ├── emotionEngine.ts      # Audio features + model facade
-│   │   ├── localEmotionModel.ts  # Embedded local audio emotion prototype net
-│   │   └── patternModel.ts       # Embedded local pattern scoring model
+│   │   ├── emotionEngine.ts      # Public API: dbToAmplitude, extractFeatures, classifyEmotion
+│   │   ├── localEmotionModel.ts  # veil-audio-prototype-net-v2: prototypes, acoustic evidence
+│   │   └── patternModel.ts       # veil-pattern-bayes-net-v2: trigger→emotion scoring
 │   │
 │   ├── db/
-│   │   ├── database.ts           # SQLite init, schema, migrations
-│   │   └── queries.ts            # All SQL queries (CRUD + analytics)
+│   │   ├── database.ts           # openDatabaseAsync, schema, column migration guards
+│   │   └── queries.ts            # All SQL: CRUD, analytics, theme persistence
 │   │
-│   ├── store/
-│   │   └── useStore.ts           # Global state: pub-sub hook, no external deps
+│   ├── store/useStore.ts         # Global pub-sub store: state, actions, useVeilStore hook
 │   │
 │   └── components/
-│       ├── PlutchikWheel.tsx     # Interactive SVG emotion wheel with gestures
-│       └── EntryCard.tsx         # Journal entry card component
+│       ├── PlutchikWheel.tsx     # SVG wheel: tap+drag gesture, theme-aware colours
+│       ├── EntryCard.tsx         # Journal card: Reanimated spring press, theme-aware
+│       ├── FadeScreen.tsx        # Tab fade wrapper: useFocusEffect + withTiming opacity
+│       └── SettingsIcon.tsx      # SVG gear: 8 teeth, computed with cos/sin, hollow centre
 │
-├── assets/
-│   └── images/
-│       ├── icon.png              # App icon (1024×1024, rounded rect, ◎ glyph)
-│       ├── adaptive-icon.png     # Android adaptive icon foreground
-│       └── splash-icon.png       # Splash screen (dark bg, centered ◎)
+├── assets/images/
+│   ├── icon.png                  # 1024×1024, dark bg, ◎ glyph
+│   ├── adaptive-icon.png         # Android adaptive foreground
+│   └── splash-icon.png           # Dark splash, centred ◎
 │
-├── app.json                      # Expo config (dark UI, splash bg #0d0b14)
-├── babel.config.js               # babel-preset-expo
-├── tsconfig.json                 # TypeScript config
+├── app.json                      # userInterfaceStyle: dark, splash bg #0d0b14
+├── babel.config.js               # babel-preset-expo (handles Hermes compat)
+├── tsconfig.json
 └── package.json
 ```
 
@@ -176,194 +186,259 @@ veil/
 ### Data flow
 
 ```
-User interaction
-      │
-      ▼
-React component (screen)
-      │  calls action
-      ▼
-useStore action (addCheckIn / addVoiceEntry)
-      │  writes to
-      ▼
-expo-sqlite (veil.db on device)
-      │  then calls loadAll()
-      ▼
-Queries: fetchCheckIns + fetchVoiceEntries
-       + computeWeeklyStats + fetchDailyMood(14) + fetchDailyMood(70)
-      │  all run in parallel via Promise.all
-      ▼
-setState() — notifies all listeners
-      │
-      ▼
-useVeilStore selectors re-render subscribed components
+User action (tap, swipe, record)
+        │
+        ▼
+React component → calls store action
+        │
+        ▼
+useStore action (addCheckIn / addVoiceEntry / setThemeMode / resetAllData…)
+        │  writes to
+        ▼
+expo-sqlite  →  veil.db  (WAL mode, localtime timestamps)
+        │  then calls loadAll()
+        ▼
+Promise.all([
+  fetchCheckIns(200),
+  fetchVoiceEntries(20),
+  computeWeeklyStats(),
+  fetchDailyMood(14),
+  fetchDailyMood(70),
+  fetchThemeMode(),
+])
+        │
+        ▼
+setState(patch)  →  notifies all listeners
+        │
+        ▼
+useVeilStore selectors → components re-render
 ```
 
-### Gesture pipeline (intensity slider)
+### Intensity slider pipeline
 
 ```
-Finger on screen
+Finger moves
       │
       ▼
-Gesture.Pan (react-native-gesture-handler)
-      │  .activeOffsetX([-4, 4])   → horizontal drag activates
-      │  .failOffsetY([-15, 15])   → vertical drag fails → ScrollView scrolls
-      ▼
-.onChange() on UI thread (Reanimated worklet)
-      │  clampX() + direct posX.value update
-      ▼
-useAnimatedStyle — thumb, fill, badge move at 60fps with zero bridge crossing
+Gesture.Pan.onChange  (UI thread — Reanimated worklet)
+  clampX() → posX.value = x                 // thumb + fill + badge move at 60fps
+  runOnJS(onChange)(calcVal(x, w))           // JS bridge only when integer step changes
       │
-      │  runOnJS(onChange) — only called when integer step changes (max 9×/drag)
-      ▼
-React setState → JS re-render (dots update, value saved)
-
-onEnd() → withSpring() snaps to nearest integer step
+onEnd:  withSpring(snap position)            // spring to nearest step
 ```
 
-### Gesture pipeline (Plutchik Wheel)
+### Plutchik Wheel gesture pipeline
 
 ```
-Finger touches wheel
+Touch begin  →  save beginEid, isDrag = false
+Touch change →  if totalTranslation > 8px: isDrag = true, setHovered(emotionAtPoint)
+Touch end    →  isDrag ? emotionAtPoint(lift pos) : beginEid   →   onSelect
+Finalize     →  clear hover, clear refs                        (gesture cancelled)
+```
+
+### Voice classification pipeline
+
+```
+expo-av metering (100ms intervals)
+      │  dbToAmplitude(): -60..0 dBFS → 0..1
+      ▼
+extractFeatures(samples[])
+  percentile(p10, p50, p90)
+  → energy, variance, tempo, peakRatio
+  → dynamicRange, attack, silenceRatio, stability
+  → arousal (linear combo)
+  → valenceProxy (linear combo)
       │
       ▼
-Gesture.Pan (minDistance: 0) — activates instantly on touch
+classifyEmotionWithLocalModel(features)
+  buildModelInput() → 10-dim vector
+  prototypeLogit()  → weighted squared distance to each prototype
+  applyAcousticEvidence() → rule-based logit adjustments
+  softmax(temperature=0.68)
+  → probabilities[8], confidence, modelVersion
       │
       ▼
-onBegin / onChange: emotionAtPoint(x, y, size)
-      │  → Math.atan2 angle → sector index (0–7) → EmotionId
-      ▼
-setHovered(eid) — live sector highlight on every frame
+User reviews result, optionally corrects emotion
       │
-onEnd: setSelected (or deselect if same sector tapped)
-onFinalize: clear hover (gesture cancelled)
+      ▼
+addVoiceEntry(path, corrected_emotion, model_emotion, confidence, features, duration, version)
+      │
+      ▼
+patternModel reads voice_entries alongside checkins
 ```
 
 ---
 
-## Emotion Engine
+## ML Models
 
-**File:** `src/engine/emotionEngine.ts`
+### Audio Emotion Classifier (`veil-audio-prototype-net-v2`)
 
-A fully self-contained, zero-runtime-dependency emotion classifier. The model is bundled in the app as TypeScript weights and runs locally in JavaScript. No network request is made.
+**File:** `src/engine/localEmotionModel.ts`
 
-### Theoretical basis
+A prototype network with an acoustic evidence adjustment layer. Entirely static TypeScript — no runtime, no file I/O.
 
-The engine is grounded in two established psychological frameworks:
+#### Architecture
 
-1. **Plutchik's Wheel of Emotions** — 8 primary emotions arranged in a circle by similarity: joy ↔ anticipation ↔ anger ↔ disgust ↔ sadness ↔ fear ↔ surprise ↔ trust. Adjacent emotions blend; opposite emotions contrast.
+**Layer 1 — Feature engineering** (`buildModelInput`)
 
-2. **Russell's Valence–Arousal Circumplex** — Emotions exist in a 2D space defined by *valence* (positive vs negative) and *arousal* (high vs low activation). This maps cleanly onto audio: high arousal = loud, fast, variable; low arousal = quiet, slow, steady.
+Eight raw acoustic features are first combined into two derived dimensions:
 
-### Pipeline
+```
+arousal      = energy×0.34 + variance×0.20 + tempo×0.18 + attack×0.16
+             + peakRatio×0.12 − silenceRatio×0.18
 
-#### Step 1: dBFS → amplitude
-`expo-av` reports microphone level in dBFS (decibels relative to full scale), where 0 is maximum and −60 is near-silence.
-
-```typescript
-function dbToAmplitude(db: number): number {
-  return (Math.max(-60, Math.min(0, db)) + 60) / 60;
-  // Maps: -60 dBFS → 0.0,  -30 dBFS → 0.5,  0 dBFS → 1.0
-}
+valenceProxy = stability×0.38 + (1−silenceRatio)×0.20
+             + (1−|energy−0.56|)×0.18 + (1−|tempo−0.5|)×0.12
+             + peakRatio×0.12 − dynamicRange×0.18
 ```
 
-Samples are collected every 100ms during recording, resulting in ~10 samples/second.
+These join the 8 raw features to form a 10-dimensional input vector:
+`[arousal, valenceProxy, energy, variance, tempo, peakRatio, dynamicRange, attack, silenceRatio, stability]`
 
-#### Step 2: Feature extraction
-The engine computes amplitude and dynamics features from the metering sample array:
+**Layer 2 — Prototype distance** (`prototypeLogit`)
 
-| Feature | Formula | Psychological meaning |
-|---------|---------|----------------------|
-| `energy` | mean amplitude | overall activation level, loudness |
-| `variance` | σ of amplitudes × 2.8 | emotional expressiveness, volume variation |
-| `tempo` | median-crossing rate | speaking pace / agitation proxy |
-| `peakRatio` | fraction of samples near upper peaks | sustained loudness |
-| `dynamicRange` | p90 - p10 amplitude range | contrast between quiet and loud parts |
-| `attack` | average positive amplitude delta | sharpness of vocal changes |
-| `silenceRatio` | fraction below quiet threshold | pauses, withdrawal, hesitation |
-| `stability` | inverse of variance + movement | calm / steady delivery |
+Each of the 8 emotions has a learned prototype (centre vector) and per-dimension weights. The logit for each emotion is:
 
-#### Step 3: Local neural inference
-`src/engine/localEmotionModel.ts` projects those features into a 10-value model input:
-
-```typescript
-[arousal, valenceProxy, energy, variance, tempo, peakRatio, dynamicRange, attack, silenceRatio, stability]
+```
+logit_e = bias_e − Σ_i  weight_{e,i} × (input_i − center_{e,i})²
 ```
 
-The vector runs through a calibrated prototype network:
-- each emotion has a weighted acoustic prototype
-- weighted distances become emotion logits
-- softmax turns logits into probabilities
-- confidence is capped and margin-based so weak evidence stays uncertain
+Higher logit = input is closer to the prototype in weighted feature space.
 
-#### Step 4: Softmax normalisation
-Logits are converted to probabilities via softmax with temperature scaling:
+**Layer 3 — Acoustic evidence adjustment** (`applyAcousticEvidence`)
 
-```typescript
-const probs = softmax(logits, 0.68);
+Rule-based logit corrections derived from known acoustic correlates of emotion. Examples:
+
+```
+anger      += high(energy, 0.62) × high(peakRatio, 0.48) × high(attack, 0.42)
+              × low(stability, 0.48) × 3.2
+
+sadness    += low(arousal, 0.38) × high(silenceRatio, 0.32) × low(energy, 0.34) × 1.15
+
+trust      += high(stability, 0.68) × low(arousal, 0.52) × high(valenceProxy, 0.64) × 0.85
 ```
 
-#### Step 5: Confidence
-Confidence is derived from the gap between the top probability and the runner-up, scaled to a realistic 42–92% range:
+`high(v, t)` and `low(v, t)` are soft threshold functions — continuous, not binary.
 
-```typescript
-confidence = 0.42 + margin * 0.92 + topProbability * 0.18
+**Layer 4 — Softmax + confidence**
+
+Softmax with temperature 0.68 (sharpens the distribution). Confidence is computed from the probability margin:
+
+```
+confidence = clamp(0.42 + margin×0.92 + topProb×0.18,  min=0.42, max=0.92)
 ```
 
-This avoids false certainty while still surfacing when the model has a clear winner.
+#### Feature extraction detail (`src/engine/emotionEngine.ts`)
 
-### Pattern Model
+| Feature | Computation | Meaning |
+|---|---|---|
+| `energy` | mean amplitude | overall loudness / activation |
+| `variance` | σ × 2.8 | expressiveness, pitch variation |
+| `tempo` | zero-crossings of median × 2.4 | speaking pace, agitation |
+| `peakRatio` | samples ≥ max(p90×0.86, peak×0.62) | sustained loudness |
+| `dynamicRange` | (p90 − p10) × 2.4 | amplitude range |
+| `attack` | mean positive delta × 9 | sharpness of onsets |
+| `silenceRatio` | samples ≤ max(0.06, p50×0.42) | pauses, hesitation |
+| `stability` | 1 − (σ×2.2 + mean\|Δ\|×4) | evenness of delivery |
+
+Percentiles (p10, p50, p90) are computed on the sorted sample array using linear interpolation.
+
+#### Accuracy
+
+Heuristic signal-processing, not a data-trained deep model. Typical performance:
+- **High-contrast states** (calm vs angry, sad vs joyful): ~70–80%
+- **Similar-arousal states** (fear vs surprise, trust vs anticipation): ~55–65%
+
+Intentional trade-off: demonstrates audio analysis without pretending to replace a trained model. The user correction flow is the designed response to classifier uncertainty.
+
+---
+
+### Pattern Model (`veil-pattern-bayes-net-v2`)
 
 **File:** `src/engine/patternModel.ts`
 
-The patterns screen also uses a local ML scoring model. For each trigger-emotion candidate it builds these features:
-- support size
-- emotional lift against the user's baseline
-- intensity delta against the user's baseline
-- recency
-- consistency
-- reliability with Bayesian smoothing
+A statistical lift model with Bayesian smoothing and decay, combining check-ins and voice entries.
 
-Those features pass through a compact Bayesian/logistic model and are normalised to a 25-93% display range. The model version is shown in the UI as `veil-pattern-bayes-net-v2`.
+#### Pipeline
+
+For each trigger that appears in the data:
+
+1. **Dominant emotion** — the emotion most frequently co-occurring with that trigger
+2. **Feature extraction:**
+
+| Feature | Formula | Meaning |
+|---|---|---|
+| `support` | log(count+1) / log(total+1) | relative frequency of this trigger |
+| `lift` | (smoothed trigger rate − 0.75) / 2.25 | how much above baseline the emotion appears |
+| `intensityDelta` | (avg intensity − global avg + 4) / 8 | whether this trigger correlates with intensity |
+| `recency` | exp(−ageDays / 21) | exponential decay — older patterns worth less |
+| `consistency` | smoothed trigger→emotion rate | reliability of the association |
+| `reliability` | √(n / (n+6)) | Wilson-style shrinkage for small samples |
+
+Bayesian smoothing (`smoothedRate`): adds 1 success + 2 observations as a prior, preventing overconfidence from small counts.
+
+3. **Scoring** — logistic function applied to a dot product with learned weights:
+
+```
+logit = support×0.72 + lift×1.28 + intensityDelta×0.58
+      + recency×0.50 + consistency×0.80 + reliability×1.10 − 1.42
+
+score = 0.25 + sigmoid(logit) × 0.68        → [0.25, 0.93]
+```
+
+4. **Voice entry contribution** — voice entries are converted to `PatternEntry` with `trigger = 'voice journal'` and intensity derived from `voicePatternIntensity()`, which computes an arousal proxy from acoustic features.
+
+Top 4 patterns by score are returned and displayed as animated bars.
 
 ---
 
 ## Database Schema
 
-**File:** `src/db/database.ts`  
 **Engine:** SQLite via `expo-sqlite` v16 async API  
-**WAL mode:** enabled for better concurrent read performance
+**Mode:** WAL (Write-Ahead Logging) for concurrent read performance  
+**Migrations:** additive only — guarded `ALTER TABLE` calls on startup check existing columns via `PRAGMA table_info`
 
 ### `checkins`
 
 | Column | Type | Notes |
-|--------|------|-------|
+|---|---|---|
 | `id` | INTEGER PK | autoincrement |
-| `emotion` | TEXT | one of 8 EmotionId values |
+| `emotion` | TEXT | EmotionId (one of 8 values) |
 | `intensity` | INTEGER | 1–10 |
-| `triggers` | TEXT | JSON array of TriggerId strings, e.g. `["work","sleep"]` |
-| `note` | TEXT | free text; custom "other" trigger stored as `#hashtag` prefix |
-| `created_at` | TEXT | `datetime('now','localtime')` ISO string |
+| `triggers` | TEXT | JSON array, e.g. `["work","sleep"]`; custom trigger stored in `note` as `#tag` |
+| `note` | TEXT | free text + optional `#other-trigger` prefix |
+| `created_at` | TEXT | `datetime('now','localtime')` |
 
 ### `voice_entries`
 
 | Column | Type | Notes |
-|--------|------|-------|
+|---|---|---|
 | `id` | INTEGER PK | autoincrement |
 | `audio_path` | TEXT | local file URI from expo-av |
-| `detected_emotion` | TEXT | final saved EmotionId after optional correction |
-| `model_emotion` | TEXT | original EmotionId predicted by the local model |
-| `confidence` | REAL | 0.42–0.92 |
-| `energy` | REAL | 0–1 acoustic feature |
-| `variance` | REAL | 0–1 acoustic feature |
-| `tempo` | REAL | 0–1 acoustic feature |
-| `peak_ratio` | REAL | 0–1 acoustic feature |
-| `dynamic_range` | REAL | 0–1 acoustic feature |
-| `attack` | REAL | 0–1 acoustic feature |
-| `silence_ratio` | REAL | 0–1 acoustic feature |
-| `stability` | REAL | 0–1 acoustic feature |
-| `model_version` | TEXT | local model version used for inference |
+| `detected_emotion` | TEXT | user-confirmed emotion (may differ from model output) |
+| `model_emotion` | TEXT | raw model prediction before user correction |
+| `confidence` | REAL | 0.42–0.92 from classifier |
+| `energy` | REAL | acoustic feature 0–1 |
+| `variance` | REAL | acoustic feature 0–1 |
+| `tempo` | REAL | acoustic feature 0–1 |
+| `peak_ratio` | REAL | acoustic feature 0–1 |
+| `dynamic_range` | REAL | acoustic feature 0–1 |
+| `attack` | REAL | acoustic feature 0–1 |
+| `silence_ratio` | REAL | acoustic feature 0–1 |
+| `stability` | REAL | acoustic feature 0–1 |
+| `model_version` | TEXT | e.g. `veil-audio-prototype-net-v2` |
 | `duration_seconds` | INTEGER | recording length |
-| `created_at` | TEXT | ISO string |
+| `created_at` | TEXT | `datetime('now','localtime')` |
+
+### `app_settings`
+
+| Column | Type | Notes |
+|---|---|---|
+| `key` | TEXT PK | e.g. `'theme_mode'` |
+| `value` | TEXT | stored value |
+| `updated_at` | TEXT | last write timestamp |
+
+Uses `INSERT … ON CONFLICT(key) DO UPDATE` (upsert) for all writes.
 
 ### Indexes
 
@@ -372,68 +447,112 @@ CREATE INDEX idx_checkins_created ON checkins(created_at DESC);
 CREATE INDEX idx_voice_created    ON voice_entries(created_at DESC);
 ```
 
-Both indexes support the common query pattern: "fetch last N records, ordered newest first."
-
-### Analytics queries
-
-**Daily mood** (`insights.tsx`): Combines manual check-ins and confirmed voice entries by `date(created_at)`, then computes average intensity per day for the 10-week heatmap. Voice entry intensity is estimated locally from acoustic arousal features.
-
-**Weekly stats** (`computeWeeklyStats`):
-- Total entry count
-- **Day streak**: iterates distinct dates descending from today, counting consecutive days with at least one check-in
-- Average intensity over last 7 days
-- Top emotion: `GROUP BY emotion ORDER BY COUNT(*) DESC LIMIT 1`
-- Top trigger: triggers are stored as JSON arrays → parsed in JS → frequency counted in a `Record<string, number>`
-
-**ML patterns** (`src/engine/patternModel.ts`):
-- Groups check-ins by trigger and confirmed voice entries under the `voice journal` source
-- Finds the top co-occurring emotion per trigger
-- Builds ML features from support, lift, intensity delta, recency, consistency, and reliability
-- Scores each candidate with the bundled local model and shows the top 4
-
 ---
 
 ## State Management
 
 **File:** `src/store/useStore.ts`
 
-A minimal pub-sub store written entirely in React. API is intentionally identical to Zustand's selector pattern so it can be replaced with Zustand in the future without changing any consumer code.
+A module-level pub-sub singleton. No external dependency, no `import.meta`.
+
+```
+module-level `state` object  ←→  `setState(patch)` → notifies all listeners
+                                  ↓
+useVeilStore<T>(selector) hook  →  subscribes on mount, unsubscribes on unmount
+                                    re-renders only the subscribing component
+```
+
+### Actions
+
+| Action | What it does |
+|---|---|
+| `loadAll()` | `Promise.all` of 6 queries, then `setState` |
+| `addCheckIn()` | insert → loadAll |
+| `addVoiceEntry()` | insert (all 8 features + model_emotion + model_version) → loadAll |
+| `setThemeMode(mode)` | `setState` immediately + `saveThemeMode()` to SQLite |
+| `resetCheckIns()` | `DELETE FROM checkins` → loadAll |
+| `resetVoiceEntries()` | `DELETE FROM voice_entries` → loadAll |
+| `resetAllData()` | both DELETEs in a transaction → loadAll |
 
 ### Why not Zustand?
 
-Zustand v4.4+ uses `import.meta.env` in its ESM build. Hermes (React Native's JS engine) does not support `import.meta`. While this can be polyfilled via `babel-preset-expo`'s `unstable_transformImportMeta` flag, the workaround was unreliable across Expo SDK versions. The custom implementation avoids the issue entirely.
+Zustand v4.4+ uses `import.meta.env` in its ESM entry point. Hermes (RN's JS engine) does not support `import.meta`. The babel-preset-expo polyfill (`unstable_transformImportMeta`) was unreliable across devices during development. The custom implementation avoids the issue entirely, and the API is identical to Zustand's selector pattern.
 
-### Implementation
+---
+
+## Animation System
+
+Every animated interaction in the app and its implementation:
+
+| Interaction | Library | Technique |
+|---|---|---|
+| Loading screen logo | RN Animated | `Animated.loop(sequence([timing 0.35, timing 1]))` |
+| Step 1→2 transition | RN Animated | `timing(0, 130ms)` → setStep → `timing(1, 200ms)` via callback |
+| "other +" slide-in | Reanimated | `withSpring` on `opacity + translateY` via `useAnimatedStyle` |
+| Button press | Reanimated | `Pressable` + `withSpring(0.96)` / `withSpring(1)` |
+| Chip press | Reanimated | `withSpring(0.93)` / `withSpring(1)` |
+| Intensity slider | Reanimated | UI-thread `Pan` gesture; thumb/fill/badge via `useAnimatedStyle` |
+| Slider snap | Reanimated | `withSpring(snapX, {damping:22, stiffness:380})` on `onEnd` |
+| Plutchik hover | React state | `setHovered()` called from `runOnJS` in `Pan.onChange` |
+| Tab fade-in | Reanimated | `FadeScreen` + `useFocusEffect` + `withTiming(1, 180ms)` |
+| EntryCard press | Reanimated | `withSpring(0.975)` / `withSpring(1)` |
+| Voice mic pulse | Reanimated | `withRepeat(withSequence(up 700ms, down 700ms), -1)` |
+| Voice result card | Reanimated | `withSpring(1)` on `opacity + translateY` (starts at 28px below) |
+| Pattern bars | Reanimated | `withDelay(i×120, withTiming(target, 700ms, Easing.out(Easing.cubic)))` |
+| Breathe ring colour | Reanimated | `interpolateColor(phaseProgress, [0..5], RING_COLORS)` |
+| Breathe scale | Reanimated | `withTiming(1.15 or 1, Easing.inOut(Easing.sin))` |
+| Breathe count pulse | Reanimated | `withTiming(0.35, 80ms)` → `withTiming(1, 160ms)` on each tick |
+| Settings row press | Reanimated | `withSpring(0.98)` / `withSpring(1)` |
+| Theme card press | Reanimated | `withSpring(0.97)` / `withSpring(1)` |
+
+---
+
+## Theme System
+
+**Files:** `src/constants/emotions.ts`, `src/store/useStore.ts`, `src/db/queries.ts`
+
+### ThemeColors type
 
 ```typescript
-// Module-level singleton — one store, no Context
-let state: VeilStore = { ... };
-const listeners = new Set<Listener>();
-
-function setState(patch: Partial<VeilStore>) {
-  state = { ...state, ...patch };        // immutable update
-  listeners.forEach(l => l());           // notify all subscribers
-}
-
-// React hook — subscribe on mount, unsubscribe on unmount
-export function useVeilStore<T>(selector: (s: VeilStore) => T): T {
-  const [, rerender] = useState(0);
-  useEffect(() => {
-    const listener = () => rerender(n => n + 1);
-    listeners.add(listener);
-    return () => listeners.delete(listener);
-  }, []);
-  return selector(state);
-}
+type ThemeColors = {
+  bg:               string;   // screen background
+  card:             string;   // card surface
+  border:           string;   // hairline borders and dividers
+  accent:           string;   // primary brand colour
+  accentDim:        string;   // accent at low opacity (chip bg, logo bg)
+  teal:             string;   // success / inhale colour
+  text:             string;   // primary text
+  textMuted:        string;   // secondary text
+  textDim:          string;   // tertiary / labels / placeholders
+  input:            string;   // text input background
+  chip:             string;   // inactive chip background
+  chipActive:       string;   // active chip background
+  chipBorderActive: string;   // active chip border
+  chipTextActive:   string;   // text inside active chip
+  textOnAccent:     string;   // text on accent-coloured buttons
+  wheelCenter:      string;   // PlutchikWheel centre fill
+  danger:           string;   // destructive action colour
+};
 ```
 
-Usage is identical to Zustand:
-```typescript
-const checkIns = useVeilStore(s => s.checkIns);
-const { addCheckIn, stats } = useVeilStore(s => ({
-  addCheckIn: s.addCheckIn, stats: s.stats,
-}));
-```
+### Palettes
+
+| Token | Dark | Light |
+|---|---|---|
+| `bg` | `#0d0b14` | `#f5f1eb` |
+| `accent` | `#8b7cf8` | `#6c5dd3` |
+| `teal` | `#4ecdc4` | `#1a9e96` |
+| `text` | `rgba(255,255,255,0.92)` | `rgba(20,15,35,0.92)` |
+| `textMuted` | `rgba(255,255,255,0.45)` | `rgba(20,15,35,0.55)` |
+| `textDim` | `rgba(255,255,255,0.25)` | `rgba(20,15,35,0.32)` |
+| `chipTextActive` | `#c4b8ff` | `#6c5dd3` |
+| `textOnAccent` | `#0d0b14` | `#ffffff` |
+| `wheelCenter` | `#1a1625` | `#ede9e2` |
+| `danger` | `#FF6B6B` | `#cc4040` |
+
+### Propagation
+
+The `theme` object is selected from the store in every screen and component: `const t = useVeilStore(s => s.theme)`. All dynamic colours are passed inline (`style={{ color: t.text }}`). Static layout values (padding, borderRadius, flex) remain in `StyleSheet.create`. The `FadeScreen` wrapper reads `theme.bg` from the store to prevent background flash during tab transitions.
 
 ---
 
@@ -441,52 +560,38 @@ const { addCheckIn, stats } = useVeilStore(s => ({
 
 ### `app/_layout.tsx` — Root Layout
 
-Wraps everything in `GestureHandlerRootView` (required for gesture handler to work in Expo Router). Calls `initDatabase()` then `loadAll()` on mount. Shows three states:
-
-- **Loading**: dark screen with `◎` logo + spinner
-- **Error**: error message with "Try again" button that re-runs init
-- **Ready**: renders the `<Stack>` navigator
+Wraps everything in `GestureHandlerRootView`. Three render states:
+- **Loading**: dark/light screen with `◎` logo, animated opacity pulse (RN Animated loop), and slide-up entrance via `Animated.spring`
+- **Error**: error message with "Try again" button; re-runs `initDatabase() → loadAll()`
+- **Ready**: renders the Expo Router `<Stack>`
 
 ### `app/(tabs)/_layout.tsx` — Tab Bar
 
-Five tabs with custom text-based icons (Unicode symbols, no icon font needed). Tab bar height 80px, paddingBottom 18px. Active color: `#8b7cf8`, inactive: `rgba(255,255,255,0.28)`.
+Six tabs. `sceneStyle: { backgroundColor: theme.bg }` prevents white flash between tab renders. `SettingsIcon` is a custom SVG gear (8 teeth + hollow centre ring), computed with `cos/sin` to match the app's circle aesthetic. All other tab icons are Unicode symbols rendered as Text.
 
 ### `app/(tabs)/index.tsx` — Check-in
 
-Two-step flow controlled by `step: 1 | 2` state. No ScrollView — each step fills the screen with flex layout.
-
-**Components used**: `PlutchikWheel`, `IntensitySlider`, `WeeklyDigest` (inline component), chip grid, `TextInput`.
-
-**IntensitySlider** is defined inline in the same file:
-- `useSharedValue` × 2 (trackW, posX) — both live on UI thread
-- `useAnimatedStyle` × 3 (thumb, fill, badge) — all animate at 60fps
-- `Gesture.Pan` with `.activeOffsetX` / `.failOffsetY` for proper ScrollView coexistence
-- `withSpring` on release for snap-to-step feel
+2-step flow controlled by `step: 1 | 2`. RN `Animated.Value` fade between steps (no Reanimated — avoids gesture conflicts). `PlutchikWheel`, `IntensitySlider`, `WeeklyDigest`, and `AnimChip` are all defined in the same file for colocation.
 
 ### `app/(tabs)/journal.tsx` — Journal
 
-`SafeAreaView` → fixed header → `FlatList` (flex: 1). The outer container never scrolls; only the list scrolls internally. Entry count shown in a badge chip next to the title.
+`SafeAreaView` → fixed header → `FlatList` (flex: 1). The screen does not scroll; the list does.
 
 ### `app/(tabs)/insights.tsx` — Patterns
 
-`ScrollView` wrapper around four blocks: heatmap card, insight callout (conditional), ML patterns card, stats grid. Scrolling is intentional — data can grow as the user adds more check-ins and voice entries.
-
-The heatmap builds a `(number | undefined)[][]` grid (10 rows × 7 cols) from combined manual + voice mood data by anchoring to the current week's Sunday and iterating backwards. Future dates are `undefined` → transparent cells.
+`ScrollView` wrapping all blocks. Data from both `checkIns` and `voiceEntries` is merged via `moodEntries = [...checkIns, ...voiceEntries mapped to common shape]`. All computed via `useMemo`. `AnimatedBar` components stagger in on mount.
 
 ### `app/(tabs)/voice.tsx` — Voice Journal
 
-Three sections in flex layout:
-- Fixed header
-- `flex: 1` mic area (centres itself vertically)
-- Fixed recent entries (last 3, no scroll)
-
-Recording lifecycle: `idle` → `recording` → `processing` → `done` → `idle`.
-
-The waveform is stored in `useState<number[]>` (not a ref), so React re-renders on every new metering sample and the bars animate live.
+Recording phase machine: `idle → recording → processing → done → idle`. Cleanup `useEffect` stops the recording and clears the interval on unmount, preventing crashes when navigating away mid-recording.
 
 ### `app/(tabs)/breathe.tsx` — Breathe
 
-Phase machine: 4 phases in a loop, 3 cycles total. Uses `useRef<ReturnType<typeof setInterval>>` for the countdown timer and `Animated.Value` for the scale animation. The circle visually breathes with the user.
+`INNER_COLORS` array computed inside the component from `t.bg` and `t.teal`/`t.accent` — captured by the Reanimated worklet at render time, so theme changes are reflected after re-render.
+
+### `app/(tabs)/settings.tsx` — Settings
+
+`ActionRow` and `ThemeCard` are animated sub-components defined in the same file. Theme cards show a miniature screen preview (bar + circle + chip) rendered in the appropriate colours. Confirmation dialogs guard all data deletion actions.
 
 ---
 
@@ -494,98 +599,69 @@ Phase machine: 4 phases in a loop, 3 cycles total. Uses `useRef<ReturnType<typeo
 
 ### Prerequisites
 
-- **Node.js** v18 or v20 (v22+ not supported by this Expo SDK)
-- **npm** v9+
-- **Expo Go** app on your iOS/Android device (SDK 54 compatible)
-- **watchman** (macOS): resolves EMFILE errors from Metro's file watcher
+- **Node.js** 18 or 20 (not 22+)
+- **Expo Go** app on device (SDK 54)
+- **watchman** (macOS) — prevents `EMFILE: too many open files`
 
 ```bash
-# Install Node 20 via nvm
 nvm install 20 && nvm use 20
-
-# Install watchman (macOS)
-brew install watchman
+brew install watchman   # macOS only
 ```
 
-### Installation
+### Install & run
 
 ```bash
-git clone https://github.com/leksik-phew/veil
+git clone <your-repo-url>
 cd veil
-
-# Install dependencies (use --legacy-peer-deps to resolve peer conflicts)
 npm install --legacy-peer-deps
+
+npx expo start          # scan QR with Expo Go
+npx expo start --clear  # if Metro hangs or after babel changes
 ```
 
-### Running
-
-```bash
-# Start Metro bundler
-npx expo start
-
-# Then in the terminal:
-#   Press i → open in iOS simulator
-#   Press a → open in Android emulator
-#   Scan QR code → open in Expo Go on your device
-
-# Clear Metro cache if you hit bundling errors
-npx expo start --clear
-```
-
-### Common issues
+### Common errors
 
 | Error | Fix |
-|-------|-----|
+|---|---|
 | `EMFILE: too many open files` | `brew install watchman` |
-| `import.meta is not supported` | Check `babel.config.js` uses `babel-preset-expo` |
-| `Cannot find module expo-sqlite/build/SQLiteDatabase` | You have expo-sqlite v14. Run `npm install expo-sqlite@~16.0.10 --legacy-peer-deps` |
-| `Project is incompatible with Expo Go` | Your Expo Go supports SDK 54. Ensure `"expo": "~54.0.33"` in package.json |
-| Metro hangs after changes | `npx expo start --clear` |
+| `import.meta is not supported` | check `babel.config.js` uses `babel-preset-expo` |
+| Project incompatible with Expo Go | ensure `"expo": "~54.0.33"` in package.json |
+| SQLite `no such column` | DB migration runs on boot — cold-start the app once |
+| Voice crash on first tap | grant microphone permission in iOS/Android Settings |
 
 ---
 
 ## Build & Deploy
 
-### iOS (EAS Build)
-
 ```bash
-# Install EAS CLI
 npm install -g eas-cli
-
-# Log in to Expo account
 eas login
-
-# Configure project (first time)
 eas build:configure
 
-# Build for device testing (ad-hoc)
+# iOS — ad-hoc (TestFlight / device)
 eas build --platform ios --profile preview
 
-# Build for App Store
+# iOS — App Store
 eas build --platform ios --profile production
-```
 
-### Android
-
-```bash
-# Build APK (for sideloading)
+# Android — APK (sideload)
 eas build --platform android --profile preview
 
-# Build AAB (for Play Store)
+# Android — AAB (Play Store)
 eas build --platform android --profile production
 ```
 
-### `eas.json` (recommended config)
+Recommended `eas.json`:
 
 ```json
 {
   "build": {
     "preview": {
-      "ios": { "simulator": false, "distribution": "internal" },
+      "ios":     { "simulator": false, "distribution": "internal" },
       "android": { "buildType": "apk" }
     },
     "production": {
-      "ios": { "distribution": "store" },
+      "ios":     { "distribution": "store" },
       "android": { "buildType": "aab" }
     }
   }
@@ -596,28 +672,10 @@ eas build --platform android --profile production
 
 ## Design System
 
-All design tokens are defined in `src/constants/emotions.ts`:
+### Emotion colours
 
-```typescript
-export const COLORS = {
-  bg:        '#0d0b14',                    // Near-black background
-  card:      'rgba(255,255,255,0.04)',      // Subtle card surface
-  border:    'rgba(255,255,255,0.08)',      // Hairline borders
-  accent:    '#8b7cf8',                    // Primary purple
-  accentDim: 'rgba(139,124,248,0.15)',      // Accent tint for backgrounds
-  teal:      '#4ecdc4',                    // Success / inhale color
-  text:      'rgba(255,255,255,0.92)',      // Primary text
-  textMuted: 'rgba(255,255,255,0.45)',      // Secondary text
-  textDim:   'rgba(255,255,255,0.25)',      // Tertiary / labels
-}
-```
-
-### Emotion color palette
-
-Each emotion has a unique color used consistently across the wheel, entry cards, and voice results:
-
-| Emotion | Color |
-|---------|-------|
+| Emotion | Colour |
+|---|---|
 | joy | `#FFD93D` |
 | trust | `#6BCB77` |
 | fear | `#4ECDC4` |
@@ -627,44 +685,38 @@ Each emotion has a unique color used consistently across the wheel, entry cards,
 | anger | `#FF6B6B` |
 | anticipation | `#FFEAA7` |
 
-### Typography
-
-No custom fonts loaded — all text uses the system font (SF Pro on iOS, Roboto on Android). Weights used: 300 (light), 400 (regular), 500 (medium), 600 (semibold).
-
 ### Component patterns
 
-**Cards**: `borderRadius: 14–18`, `borderWidth: 0.5`, `borderColor: COLORS.border`, `backgroundColor: COLORS.card`, `padding: 14–18`
+**Cards** — `borderRadius: 14–18`, `borderWidth: 0.5`, `borderColor: t.border`, `backgroundColor: t.card`, `padding: 14–18`
 
-**Chips**: `borderRadius: 20` (pill), `paddingHorizontal: 14–16`, `paddingVertical: 7–8`
+**Chips** — `borderRadius: 20` (pill), `paddingHorizontal: 14–16`, `paddingVertical: 7–8`
 
-**Section labels**: `fontSize: 11`, `fontWeight: '600'`, `letterSpacing: 0.07`, `textTransform: 'uppercase'`, `color: rgba(255,255,255,0.3)`
+**Section labels** — `fontSize: 11`, `fontWeight: '600'`, `letterSpacing: 0.07`, `textTransform: 'uppercase'`, `color: t.textDim`
 
-**Primary buttons**: `borderRadius: 14–16`, `paddingVertical: 14–16`, background = active emotion color or `COLORS.accent`
+**Buttons** — `borderRadius: 14–16`, `paddingVertical: 14–16`, text colour `t.textOnAccent` (ensures contrast on both accent purple and bright emotion colours)
+
+**Typography** — system font only (SF Pro on iOS, Roboto on Android). Weights: 300, 400, 500, 600.
 
 ---
 
 ## Roadmap
 
-Features planned but not yet implemented:
-
-- **Notifications / reminders** — daily push notification at a user-configured time using `expo-notifications`
-- **Home screen widget** — one-tap check-in from the iOS/Android home screen using `expo-quick-actions` or a native widget extension
-- **Data export** — download all check-ins as JSON or CSV using `expo-sharing`
-- **Sleep + energy tracking** — two additional sliders on step 1 of check-in; feeds real sleep→mood correlation into the patterns screen
-- **Personalised ML** — fine-tune the bundled local models from the user's own labelled history, entirely on-device
-- **Themes** — light mode and alternative accent color options
-- **iCloud / local backup** — opt-in database export to iCloud Drive (not sync — just backup)
+- **Push notifications** — daily check-in reminder at a user-configured time via `expo-notifications`
+- **Home screen widget** — one-tap emotion log without opening the app
+- **Data export** — JSON/CSV download via `expo-sharing`
+- **Sleep + energy inputs** — two extra sliders in check-in step 1; feeds real correlations into patterns
+- **On-device fine-tuning** — accumulate confirmed voice labels to personalise the prototype model weights (no data leaves the device)
+- **iCloud backup** — opt-in SQLite export to iCloud Drive (not sync)
 
 ---
 
 ## Privacy
 
-Veil was designed from the ground up with privacy as a constraint, not an afterthought:
-
-- **No accounts.** The app has no concept of a user identity.
-- **No network requests.** The app never opens a network connection. There is no telemetry, no crash reporting, no analytics.
-- **No third-party SDKs.** Every dependency is open-source and ships no tracking code.
-- **Local storage only.** The SQLite database (`veil.db`) lives in the app's sandboxed document directory. Audio files are stored in the same sandbox. Both are deleted when the app is uninstalled.
-- **On-device processing.** Emotion detection and pattern scoring run entirely in JavaScript on the device. Audio is never transmitted anywhere.
+- **No accounts.** No concept of user identity.
+- **No network requests.** The app never calls any API. No telemetry, no crash reporting, no analytics.
+- **No third-party tracking SDKs.**
+- **Local storage only.** `veil.db` lives in the app's sandboxed document directory and is deleted on uninstall.
+- **On-device ML.** Both models run synchronously in the JS thread. Audio is never transmitted.
+- **Theme preference** is stored in the same local SQLite database. It never leaves the device.
 
 Zero bytes leave the device.
