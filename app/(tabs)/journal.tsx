@@ -2,13 +2,15 @@ import React from 'react';
 import { View, Text, FlatList, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import EntryCard from '../../src/components/EntryCard';
+import { FadeScreen } from '../../src/components/FadeScreen';
 import { useVeilStore } from '../../src/store/useStore';
 import { COLORS } from '../../src/constants/emotions';
 
 export default function JournalScreen() {
   const checkIns = useVeilStore(s => s.checkIns);
   return (
-    <SafeAreaView style={s.safe} edges={['top']}>
+    <FadeScreen>
+      <SafeAreaView style={s.safe} edges={['top']}>
       <View style={s.header}>
         <Text style={s.title}>journal</Text>
         <View style={s.badge}>
@@ -31,7 +33,8 @@ export default function JournalScreen() {
         contentContainerStyle={s.listContent}
         showsVerticalScrollIndicator={false}
       />
-    </SafeAreaView>
+      </SafeAreaView>
+    </FadeScreen>
   );
 }
 

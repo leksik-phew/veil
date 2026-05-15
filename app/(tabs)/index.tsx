@@ -1,23 +1,81 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity,
+  View, Text, TextInput, Pressable,
   StyleSheet, Alert, LayoutChangeEvent,
+  Animated as RNAnimated,           // ← RN Animated for step fade (reliable)
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, { useSharedValue, useAnimatedStyle, runOnJS, withSpring } from 'react-native-reanimated';
+import Animated, {                   // ← Reanimated for slider / button spring
+  useSharedValue, useAnimatedStyle, runOnJS,
+  withSpring, withTiming, interpolate, Easing,
+} from 'react-native-reanimated';
 import PlutchikWheel from '../../src/components/PlutchikWheel';
+import { FadeScreen } from '../../src/components/FadeScreen';
 import { TRIGGERS, COLORS, getEmotion } from '../../src/constants/emotions';
 import { useVeilStore } from '../../src/store/useStore';
 import type { EmotionId, TriggerId } from '../../src/types';
 
-// ── Intensity Slider ──────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Animated button (Reanimated spring scale)
+// ─────────────────────────────────────────────────────────────────────────────
+function PressBtn({
+  onPress, style, textStyle, label, disabled = false,
+}: {
+  onPress: () => void; style: any; textStyle: any; label: string; disabled?: boolean;
+}) {
+  const scale = useSharedValue(1);
+  const anim  = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+  return (
+    <Pressable
+      onPressIn={() => { scale.value = withSpring(0.96, { damping: 20, stiffness: 300, mass: 0.7 }); }}
+      onPressOut={() => { scale.value = withSpring(1,    { damping: 18, stiffness: 260, mass: 0.7 }); }}
+      onPress={onPress}
+      disabled={disabled}
+    >
+      <Animated.View style={[style, anim]}>
+        <Text style={textStyle}>{label}</Text>
+      </Animated.View>
+    </Pressable>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Animated chip
+// ─────────────────────────────────────────────────────────────────────────────
+function AnimChip({
+  active, onPress, label,
+  baseStyle, activeStyle, textStyle, activeTextStyle,
+}: {
+  active: boolean; onPress: () => void; label: string;
+  baseStyle: any; activeStyle: any; textStyle: any; activeTextStyle: any;
+}) {
+  const scale = useSharedValue(1);
+  const anim  = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+  return (
+    <Pressable
+      onPressIn={() => { scale.value = withSpring(0.93, { damping: 22, stiffness: 380, mass: 0.5 }); }}
+      onPressOut={() => { scale.value = withSpring(1,    { damping: 20, stiffness: 300, mass: 0.5 }); }}
+      onPress={onPress}
+    >
+      <Animated.View style={[baseStyle, active && activeStyle, anim]}>
+        <Text style={[textStyle, active && activeTextStyle]}>{label}</Text>
+      </Animated.View>
+    </Pressable>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Intensity slider (fully on UI thread)
+// ─────────────────────────────────────────────────────────────────────────────
 const THUMB = 28, HALF = 14, TRACK_H = 5;
 function calcX(v: number, w: number)   { 'worklet'; return HALF + ((v - 1) / 9) * (w - THUMB); }
 function calcVal(x: number, w: number) { 'worklet'; return Math.round(Math.min(10, Math.max(1, 1 + ((x - HALF) / Math.max(w - THUMB, 1)) * 9))); }
 function clampX(x: number, w: number)  { 'worklet'; return Math.min(Math.max(x, HALF), w - HALF); }
 
-function IntensitySlider({ value, onChange, color }: { value: number; onChange: (v: number) => void; color: string }) {
+function IntensitySlider({ value, onChange, color }: {
+  value: number; onChange: (v: number) => void; color: string;
+}) {
   const trackW = useSharedValue(1);
   const posX   = useSharedValue(HALF);
 
@@ -81,8 +139,9 @@ const sl = StyleSheet.create({
   dot:       { flex: 1, height: 3, borderRadius: 2 },
 });
 
-// ── Weekly Digest ─────────────────────────────────────────────────────────────
-const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+// ─────────────────────────────────────────────────────────────────────────────
+// Weekly digest
+// ─────────────────────────────────────────────────────────────────────────────
 function isSameWeek(dateStr: string, now: Date) {
   const d = new Date(dateStr), sw = new Date(now);
   sw.setDate(now.getDate() - now.getDay()); sw.setHours(0, 0, 0, 0);
@@ -121,9 +180,13 @@ const wd = StyleSheet.create({
   sub:       { fontSize: 10, color: COLORS.textDim },
 });
 
-// ── Screen ────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Screen
+// ─────────────────────────────────────────────────────────────────────────────
 export default function CheckInScreen() {
-  const { addCheckIn, checkIns } = useVeilStore(s => ({ addCheckIn: s.addCheckIn, checkIns: s.checkIns }));
+  const { addCheckIn, checkIns } = useVeilStore(s => ({
+    addCheckIn: s.addCheckIn, checkIns: s.checkIns,
+  }));
   const [step, setStep]           = useState<1 | 2>(1);
   const [sel, setSel]             = useState<EmotionId | null>(null);
   const [intensity, setInt]       = useState(5);
@@ -133,12 +196,37 @@ export default function CheckInScreen() {
   const [note, setNote]           = useState('');
   const [saved, setSaved]         = useState(false);
 
+  // ── Step fade (plain RN Animated — no conflict with gesture handlers) ────────
+  const fadeAnim = useRef(new RNAnimated.Value(1)).current;
+
+  const transitionTo = (nextStep: 1 | 2) => {
+    RNAnimated.timing(fadeAnim, {
+      toValue: 0, duration: 130,
+      useNativeDriver: true,
+    }).start(() => {
+      setStep(nextStep);
+      RNAnimated.timing(fadeAnim, {
+        toValue: 1, duration: 200,
+        useNativeDriver: true,
+      }).start();
+    });
+  };
+
+  // ── Other input slide-in (Reanimated) ────────────────────────────────────────
+  const otherAnim = useSharedValue(0);
+  useEffect(() => {
+    otherAnim.value = withSpring(otherActive ? 1 : 0, { damping: 20, stiffness: 260, mass: 0.6 });
+  }, [otherActive]);
+  const otherStyle = useAnimatedStyle(() => ({
+    opacity:   otherAnim.value,
+    transform: [{ translateY: interpolate(otherAnim.value, [0, 1], [-8, 0]) }],
+  }));
+
   const toggle = (id: TriggerId) =>
     setTrigs(p => p.includes(id) ? p.filter(t => t !== id) : [...p, id]);
 
   const reset = () => {
-    setSel(null); setInt(5); setTrigs([]); setOther(false);
-    setOtherText(''); setNote(''); setStep(1);
+    setSel(null); setInt(5); setTrigs([]); setOther(false); setOtherText(''); setNote('');
   };
 
   const save = async () => {
@@ -146,132 +234,141 @@ export default function CheckInScreen() {
     const parts = [otherActive && otherText ? `#${otherText}` : '', note].filter(Boolean);
     await addCheckIn(sel, intensity, trigs, parts.join(' · ').trim());
     setSaved(true);
-    setTimeout(() => { setSaved(false); reset(); }, 1400);
+    setTimeout(() => { setSaved(false); reset(); transitionTo(1); }, 1400);
   };
 
   const emo      = sel ? getEmotion(sel) : null;
   const btnColor = saved ? COLORS.teal : emo?.color ?? COLORS.accent;
 
   return (
+    <FadeScreen>
     <SafeAreaView style={s.safe} edges={['top']}>
+      {/* Single animated wrapper — only opacity, no layout changes */}
+      <RNAnimated.View style={[s.fill, { opacity: fadeAnim }]}>
 
-      {/* ── STEP 1 ── */}
-      {step === 1 && (
-        <View style={s.fill}>
-          <View style={s.header}>
-            <View>
-              <Text style={s.title}>how are you feeling?</Text>
-              <Text style={s.sub}>
-                {new Date().toLocaleDateString('en', { weekday: 'long', month: 'long', day: 'numeric' })}
-              </Text>
-            </View>
-            <View style={s.logo}>
-              <Text style={{ fontSize: 16, color: COLORS.accent }}>◎</Text>
-            </View>
-          </View>
-
-          <WeeklyDigest checkIns={checkIns} />
-
-          <View style={s.wheelWrap}>
-            <PlutchikWheel selected={sel} onSelect={setSel} size={250} />
-          </View>
-
-          <View style={s.sliderWrap}>
-            <Text style={s.label}>intensity</Text>
-            <IntensitySlider value={intensity} onChange={setInt} color={emo?.color ?? COLORS.accent} />
-          </View>
-
-          <View style={s.footer}>
-            <TouchableOpacity
-              onPress={() => { if (!sel) { Alert.alert('Choose an emotion'); return; } setStep(2); }}
-              activeOpacity={0.85}
-              style={[s.btn, { backgroundColor: emo?.color ?? COLORS.accent, opacity: sel ? 1 : 0.4 }]}
-            >
-              <Text style={s.btnText}>next  →</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
-
-      {/* ── STEP 2 ── */}
-      {step === 2 && (
-        <View style={s.fill}>
-          <View style={s.header}>
-            <TouchableOpacity onPress={() => setStep(1)} style={s.backBtn} activeOpacity={0.7}>
-              <Text style={s.backText}>←</Text>
-            </TouchableOpacity>
-            <View style={s.stepDots}>
-              <View style={[s.stepDot, { backgroundColor: COLORS.textDim }]} />
-              <View style={[s.stepDot, { backgroundColor: emo?.color ?? COLORS.accent }]} />
-            </View>
-            <View style={[s.emoChip, {
-              backgroundColor: (emo?.color ?? COLORS.accent) + '22',
-              borderColor:     (emo?.color ?? COLORS.accent) + '55',
-            }]}>
-              <Text style={[s.emoChipText, { color: emo?.color ?? COLORS.accent }]}>
-                {emo?.label ?? ''}  ·  {intensity}/10
-              </Text>
-            </View>
-          </View>
-
-          <View style={s.section}>
-            <Text style={s.label}>what triggered this?</Text>
-            <View style={s.chips}>
-              {TRIGGERS.map(t => {
-                const active = trigs.includes(t.id);
-                return (
-                  <TouchableOpacity key={t.id} onPress={() => toggle(t.id)}
-                    style={[s.chip, active && s.chipOn]}>
-                    <Text style={[s.chipText, active && s.chipTextOn]}>{t.label}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-              <TouchableOpacity
-                onPress={() => { setOther(o => !o); if (otherActive) setOtherText(''); }}
-                style={[s.chip, otherActive && s.chipOn]}
-              >
-                <Text style={[s.chipText, otherActive && s.chipTextOn]}>
-                  {otherActive && otherText ? otherText : 'other +'}
+        {/* ── STEP 1 ── */}
+        {step === 1 && (
+          <View style={s.fill}>
+            <View style={s.header}>
+              <View>
+                <Text style={s.title}>how are you feeling?</Text>
+                <Text style={s.sub}>
+                  {new Date().toLocaleDateString('en', { weekday: 'long', month: 'long', day: 'numeric' })}
                 </Text>
-              </TouchableOpacity>
+              </View>
+              <View style={s.logo}>
+                <Text style={{ fontSize: 16, color: COLORS.accent }}>◎</Text>
+              </View>
             </View>
 
-            {otherActive && (
-              <TextInput
-                value={otherText}
-                onChangeText={setOtherText}
-                placeholder="describe your trigger..."
-                placeholderTextColor="rgba(255,255,255,0.2)"
-                style={s.otherInput}
-                autoFocus
-                maxLength={40}
+            <WeeklyDigest checkIns={checkIns} />
+
+            <View style={s.wheelWrap}>
+              <PlutchikWheel selected={sel} onSelect={setSel} size={250} />
+            </View>
+
+            <View style={s.sliderWrap}>
+              <Text style={s.label}>intensity</Text>
+              <IntensitySlider value={intensity} onChange={setInt} color={emo?.color ?? COLORS.accent} />
+            </View>
+
+            <View style={s.footer}>
+              <PressBtn
+                onPress={() => {
+                  if (!sel) { Alert.alert('Choose an emotion'); return; }
+                  transitionTo(2);
+                }}
+                style={[s.btn, { backgroundColor: emo?.color ?? COLORS.accent, opacity: sel ? 1 : 0.4 }]}
+                textStyle={s.btnText}
+                label="next  →"
+                disabled={!sel}
               />
-            )}
+            </View>
           </View>
+        )}
 
-          <View style={s.section}>
-            <Text style={s.label}>note</Text>
-            <TextInput
-              value={note}
-              onChangeText={setNote}
-              placeholder="what's happening inside..."
-              placeholderTextColor="rgba(255,255,255,0.2)"
-              multiline
-              numberOfLines={4}
-              style={s.noteInput}
-            />
+        {/* ── STEP 2 ── */}
+        {step === 2 && (
+          <View style={s.fill}>
+            <View style={s.header}>
+              <Pressable
+                onPress={() => transitionTo(1)}
+                style={({ pressed }) => [s.backBtn, { opacity: pressed ? 0.6 : 1 }]}
+              >
+                <Text style={s.backText}>←</Text>
+              </Pressable>
+              <View style={s.stepDots}>
+                <View style={[s.stepDot, { backgroundColor: COLORS.textDim }]} />
+                <View style={[s.stepDot, { backgroundColor: emo?.color ?? COLORS.accent }]} />
+              </View>
+              <View style={[s.emoChip, {
+                backgroundColor: (emo?.color ?? COLORS.accent) + '22',
+                borderColor:     (emo?.color ?? COLORS.accent) + '55',
+              }]}>
+                <Text style={[s.emoChipText, { color: emo?.color ?? COLORS.accent }]}>
+                  {emo?.label ?? ''}  ·  {intensity}/10
+                </Text>
+              </View>
+            </View>
+
+            <View style={s.section}>
+              <Text style={s.label}>what triggered this?</Text>
+              <View style={s.chips}>
+                {TRIGGERS.map(t => (
+                  <AnimChip
+                    key={t.id}
+                    active={trigs.includes(t.id)}
+                    onPress={() => toggle(t.id)}
+                    label={t.label}
+                    baseStyle={s.chip} activeStyle={s.chipOn}
+                    textStyle={s.chipText} activeTextStyle={s.chipTextOn}
+                  />
+                ))}
+                <AnimChip
+                  active={otherActive}
+                  onPress={() => { setOther(o => !o); if (otherActive) setOtherText(''); }}
+                  label={otherActive && otherText ? otherText : 'other +'}
+                  baseStyle={s.chip} activeStyle={s.chipOn}
+                  textStyle={s.chipText} activeTextStyle={s.chipTextOn}
+                />
+              </View>
+
+              {otherActive && (
+                <Animated.View style={otherStyle}>
+                  <TextInput
+                    value={otherText} onChangeText={setOtherText}
+                    placeholder="describe your trigger..."
+                    placeholderTextColor="rgba(255,255,255,0.2)"
+                    style={s.otherInput} autoFocus maxLength={40}
+                  />
+                </Animated.View>
+              )}
+            </View>
+
+            <View style={s.section}>
+              <Text style={s.label}>note</Text>
+              <TextInput
+                value={note} onChangeText={setNote}
+                placeholder="what's happening inside..."
+                placeholderTextColor="rgba(255,255,255,0.2)"
+                multiline numberOfLines={4} style={s.noteInput}
+              />
+            </View>
+
+            <View style={s.footer}>
+              <PressBtn
+                onPress={save}
+                style={[s.btn, { backgroundColor: btnColor }]}
+                textStyle={s.btnText}
+                label={saved ? '✓  saved' : 'lift the veil'}
+              />
+            </View>
           </View>
+        )}
 
-          <View style={s.footer}>
-            <TouchableOpacity onPress={save} activeOpacity={0.85}
-              style={[s.btn, { backgroundColor: btnColor }]}>
-              <Text style={s.btnText}>{saved ? '✓  saved' : 'lift the veil'}</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
-
+      </RNAnimated.View>
     </SafeAreaView>
+    </FadeScreen>
   );
 }
 
@@ -288,7 +385,6 @@ const s = StyleSheet.create({
   btn:         { borderRadius: 16, paddingVertical: 16, alignItems: 'center' },
   btnText:     { fontSize: 16, fontWeight: '600', color: '#0d0b14' },
   label:       { fontSize: 11, fontWeight: '600', letterSpacing: 0.07, textTransform: 'uppercase', color: 'rgba(255,255,255,0.3)', marginBottom: 12 },
-  // Step 2
   backBtn:     { width: 38, height: 38, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center' },
   backText:    { fontSize: 18, color: COLORS.textMuted },
   stepDots:    { flexDirection: 'row', gap: 7, alignItems: 'center' },

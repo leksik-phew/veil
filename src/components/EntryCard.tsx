@@ -1,36 +1,45 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Pressable } from 'react-native';
+import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import { getEmotion, COLORS } from '../constants/emotions';
 import type { CheckIn } from '../types';
 
 export default function EntryCard({ entry }: { entry: CheckIn }) {
   const emotion = getEmotion(entry.emotion);
-  const d = new Date(entry.createdAt);
+  const d       = new Date(entry.createdAt);
   const dateStr = d.toLocaleDateString('en', { month: 'short', day: 'numeric' });
   const timeStr = d.toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' });
 
+  const scale    = useSharedValue(1);
+  const animStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+
   return (
-    <View style={s.card}>
-      <View style={s.row}>
-        <View style={[s.dot, { backgroundColor: emotion.color }]} />
-        <View style={s.body}>
-          <View style={s.head}>
-            <Text style={[s.emo, { color: emotion.color }]}>{emotion.label}</Text>
-            <Text style={s.time}>{dateStr} · {timeStr}</Text>
+    <Pressable
+      onPressIn={() => { scale.value = withSpring(0.975, { damping: 26, stiffness: 400, mass: 0.5 }); }}
+      onPressOut={() => { scale.value = withSpring(1,     { damping: 22, stiffness: 300, mass: 0.5 }); }}
+    >
+      <Animated.View style={[s.card, animStyle]}>
+        <View style={s.row}>
+          <View style={[s.dot, { backgroundColor: emotion.color }]} />
+          <View style={s.body}>
+            <View style={s.head}>
+              <Text style={[s.emo, { color: emotion.color }]}>{emotion.label}</Text>
+              <Text style={s.time}>{dateStr} · {timeStr}</Text>
+            </View>
+            {entry.triggers.length > 0 && (
+              <Text style={s.trigger}>{entry.triggers.join(', ')}</Text>
+            )}
+            {entry.note.length > 0 && (
+              <Text style={s.note} numberOfLines={2}>{entry.note}</Text>
+            )}
           </View>
-          {entry.triggers.length > 0 && (
-            <Text style={s.trigger}>{entry.triggers.join(', ')}</Text>
-          )}
-          {entry.note.length > 0 && (
-            <Text style={s.note} numberOfLines={2}>{entry.note}</Text>
-          )}
         </View>
-      </View>
-      <View style={s.barTrack}>
-        <View style={[s.barFill, { width: `${entry.intensity * 10}%` as any, backgroundColor: emotion.color + '80' }]} />
-      </View>
-      <Text style={s.intensity}>{entry.intensity}/10</Text>
-    </View>
+        <View style={s.barTrack}>
+          <View style={[s.barFill, { width: `${entry.intensity * 10}%` as any, backgroundColor: emotion.color + '80' }]} />
+        </View>
+        <Text style={s.intensity}>{entry.intensity}/10</Text>
+      </Animated.View>
+    </Pressable>
   );
 }
 

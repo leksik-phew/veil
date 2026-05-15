@@ -1,57 +1,184 @@
-import React, { useState, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import React, { useState, useRef, useEffect } from 'react';
+import { View, Text, Pressable, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Animated, {
+  useSharedValue, useAnimatedStyle,
+  withSpring, withTiming, withRepeat, withSequence,
+  interpolate, Easing,
+} from 'react-native-reanimated';
+import { FadeScreen } from '../../src/components/FadeScreen';
 import { Audio } from 'expo-av';
 import { useVeilStore } from '../../src/store/useStore';
 import { COLORS, EMOTIONS, getEmotion } from '../../src/constants/emotions';
-import { dbToAmplitude, extractFeatures, classifyEmotion, featureDescription } from '../../src/engine/emotionEngine';
+import {
+  dbToAmplitude, extractFeatures, classifyEmotion, featureDescription,
+} from '../../src/engine/emotionEngine';
 import type { EmotionId, AudioFeatures } from '../../src/types';
 
 type Phase = 'idle' | 'recording' | 'processing' | 'done';
+
+// ── Animated choice chip ──────────────────────────────────────────────────────
+function ChoiceChip({ label, active, color, onPress }: {
+  label: string; active: boolean; color: string; onPress: () => void;
+}) {
+  const scale = useSharedValue(1);
+  const anim  = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+  return (
+    <Pressable
+      onPressIn={() => { scale.value = withSpring(0.90, { damping: 20, stiffness: 380, mass: 0.5 }); }}
+      onPressOut={() => { scale.value = withSpring(1,    { damping: 18, stiffness: 300, mass: 0.5 }); }}
+      onPress={onPress}
+    >
+      <Animated.View style={[
+        cc.chip,
+        active && { backgroundColor: color + '24', borderColor: color + '80' },
+        anim,
+      ]}>
+        <Text style={[cc.text, active && { color }]}>{label}</Text>
+      </Animated.View>
+    </Pressable>
+  );
+}
+const cc = StyleSheet.create({
+  chip: { borderRadius: 14, borderWidth: 1, borderColor: COLORS.border, paddingHorizontal: 10, paddingVertical: 5, backgroundColor: 'rgba(255,255,255,0.04)' },
+  text: { fontSize: 12, color: COLORS.textMuted, fontWeight: '600' },
+});
+
+// ── Animated save button ──────────────────────────────────────────────────────
+function SaveBtn({ onPress, label, color, disabled }: {
+  onPress: () => void; label: string; color: string; disabled: boolean;
+}) {
+  const scale = useSharedValue(1);
+  const anim  = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+  return (
+    <Pressable
+      onPressIn={() => { scale.value = withSpring(0.96, { damping: 20, stiffness: 300 }); }}
+      onPressOut={() => { scale.value = withSpring(1,    { damping: 18, stiffness: 260 }); }}
+      onPress={onPress} disabled={disabled}
+    >
+      <Animated.View style={[s.saveBtn, { backgroundColor: color, opacity: disabled ? 0.6 : 1 }, anim]}>
+        <Text style={s.saveText}>{label}</Text>
+      </Animated.View>
+    </Pressable>
+  );
+}
 
 export default function VoiceScreen() {
   const { voiceEntries, addVoiceEntry } = useVeilStore(s => ({
     voiceEntries: s.voiceEntries, addVoiceEntry: s.addVoiceEntry,
   }));
+
   const [phase, setPhase]       = useState<Phase>('idle');
   const [secs, setSecs]         = useState(0);
   const [waveBars, setWaveBars] = useState<number[]>([]);
   const [saving, setSaving]     = useState(false);
   const [result, setResult]     = useState<{
-    audioPath: string;
-    duration: number;
-    emotion: EmotionId;
-    modelEmotion: EmotionId;
-    confidence: number;
-    features: AudioFeatures;
-    desc: string;
-    modelVersion: string;
+    audioPath: string; duration: number;
+    emotion: EmotionId; modelEmotion: EmotionId;
+    confidence: number; features: any;
+    desc: string; modelVersion: string;
   } | null>(null);
+
   const recRef     = useRef<Audio.Recording | null>(null);
   const timerRef   = useRef<ReturnType<typeof setInterval> | null>(null);
   const samplesRef = useRef<number[]>([]);
 
+  // ── Result card entrance ─────────────────────────────────────────────────────
+  const resultAnim = useSharedValue(0);
+  useEffect(() => {
+    if (phase === 'done') {
+      resultAnim.value = 0;
+      resultAnim.value = withSpring(1, { damping: 18, stiffness: 160, mass: 0.9 });
+    } else {
+      resultAnim.value = withTiming(0, { duration: 100 });
+    }
+  }, [phase]);
+  const resultStyle = useAnimatedStyle(() => ({
+    opacity:   resultAnim.value,
+    transform: [{ translateY: interpolate(resultAnim.value, [0, 1], [28, 0]) }],
+  }));
+
+  // ── Mic ring pulse — withRepeat (no recursive callbacks) ─────────────────────
+  const ringScale = useSharedValue(1);
+  useEffect(() => {
+    if (phase === 'recording') {
+      ringScale.value = withRepeat(
+        withSequence(
+          withTiming(1.07, { duration: 700, easing: Easing.inOut(Easing.sin) }),
+          withTiming(1.00, { duration: 700, easing: Easing.inOut(Easing.sin) }),
+        ),
+        -1,   // infinite
+        false // don't reverse (sequence already goes up then down)
+      );
+    } else {
+      ringScale.value = withSpring(1, { damping: 18, stiffness: 250 });
+    }
+  }, [phase]);
+  const ringStyle = useAnimatedStyle(() => ({ transform: [{ scale: ringScale.value }] }));
+
+  // ── Recording ────────────────────────────────────────────────────────────────
   const start = async () => {
     try {
-      const { granted } = await Audio.requestPermissionsAsync();
-      if (!granted) { Alert.alert('Permission required', 'Microphone access is needed.'); return; }
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
-      const { recording } = await Audio.Recording.createAsync({
-        ...Audio.RecordingOptionsPresets.HIGH_QUALITY, isMeteringEnabled: true,
+      const { status } = await Audio.requestPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission required', 'Please allow microphone access in Settings.');
+        return;
+      }
+
+      // Configure audio session before creating the recording
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS:    true,
+        playsInSilentModeIOS:  true,
+        staysActiveInBackground: false,
+        shouldDuckAndroid:     true,
       });
+
+      const { recording } = await Audio.Recording.createAsync(
+        {
+          android: {
+            extension:       '.m4a',
+            outputFormat:    Audio.AndroidOutputFormat.MPEG_4,
+            audioEncoder:    Audio.AndroidAudioEncoder.AAC,
+            sampleRate:      44100,
+            numberOfChannels: 1,
+            bitRate:         128000,
+          },
+          ios: {
+            extension:          '.m4a',
+            outputFormat:       Audio.IOSOutputFormat.MPEG4AAC,
+            audioQuality:       Audio.IOSAudioQuality.MEDIUM,
+            sampleRate:         44100,
+            numberOfChannels:   1,
+            bitRate:            128000,
+            linearPCMBitDepth:  16,
+            linearPCMIsBigEndian: false,
+            linearPCMIsFloat:   false,
+          },
+          web: { mimeType: 'audio/webm', bitsPerSecond: 128000 },
+          isMeteringEnabled: true,
+        }
+      );
+
       recRef.current   = recording;
       samplesRef.current = [];
       setPhase('recording'); setSecs(0); setResult(null); setSaving(false); setWaveBars([]);
+
       timerRef.current = setInterval(async () => {
-        setSecs(s => s + 0.1);
-        const st = await recording.getStatusAsync();
-        if (st.isRecording && st.metering !== undefined) {
-          const amp = dbToAmplitude(st.metering);
-          samplesRef.current.push(amp);
-          setWaveBars(prev => [...prev.slice(-28), amp]);
-        }
+        setSecs(prev => prev + 0.1);
+        try {
+          const st = await recording.getStatusAsync();
+          if (st.isRecording && st.metering !== undefined) {
+            const amp = dbToAmplitude(st.metering);
+            samplesRef.current.push(amp);
+            setWaveBars(prev => [...prev.slice(-28), amp]);
+          }
+        } catch { /* metering polling error — ignore */ }
       }, 100);
-    } catch { Alert.alert('Error', 'Could not start recording.'); }
+
+    } catch (err) {
+      console.error('Recording start error:', err);
+      Alert.alert('Could not start recording', String(err));
+    }
   };
 
   const stop = async () => {
@@ -63,72 +190,77 @@ export default function VoiceScreen() {
       const uri      = recRef.current.getURI() ?? '';
       const duration = Math.round(secs);
       recRef.current = null;
-      await new Promise(r => setTimeout(r, 400));
-      const features           = extractFeatures(samplesRef.current);
-      const { emotion, confidence, modelVersion } = classifyEmotion(features);
+
+      // Small delay so the UI shows "processing"
+      await new Promise(r => setTimeout(r, 350));
+
+      const features = extractFeatures(samplesRef.current);
+      const { emotion, confidence, modelVersion } = classifyEmotion(features) as any;
+
       setResult({
-        audioPath: uri,
-        duration,
-        emotion,
-        modelEmotion: emotion,
-        confidence,
-        features,
+        audioPath: uri, duration,
+        emotion, modelEmotion: emotion,
+        confidence, features,
         desc: featureDescription(features),
-        modelVersion,
+        modelVersion: modelVersion ?? 'veil-engine-v1',
       });
       setPhase('done');
-    } catch (e) { console.error(e); setPhase('idle'); }
+    } catch (err) {
+      console.error('Recording stop error:', err);
+      setPhase('idle');
+    }
   };
 
-  const chooseEmotion = (emotion: EmotionId) => {
-    setResult(r => r ? { ...r, emotion } : r);
-  };
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      clearInterval(timerRef.current!);
+      if (recRef.current) {
+        recRef.current.stopAndUnloadAsync().catch(() => {});
+        recRef.current = null;
+      }
+    };
+  }, []);
 
-  const saveVoiceResult = async () => {
+  const chooseEmotion    = (eid: EmotionId) => setResult(r => r ? { ...r, emotion: eid } : r);
+  const saveVoiceResult  = async () => {
     if (!result || saving) return;
     setSaving(true);
-    await addVoiceEntry(
-      result.audioPath,
-      result.emotion,
-      result.modelEmotion,
-      result.confidence,
-      result.features,
-      result.duration,
-      result.modelVersion,
-    );
-    setSaving(false);
-    setResult(null);
-    setPhase('idle');
+    try {
+      await addVoiceEntry(
+        result.audioPath, result.emotion, result.modelEmotion,
+        result.confidence, result.features, result.duration,
+        result.modelVersion,
+      );
+    } finally {
+      setSaving(false); setResult(null); setPhase('idle');
+    }
   };
 
-  const onMic    = () => { if (phase === 'idle' || phase === 'done') start(); else if (phase === 'recording') stop(); };
-  const micColor  = phase === 'recording' ? '#FF6B6B' : COLORS.accent;
-  const ringColor = phase === 'recording' ? 'rgba(255,107,107,0.3)' : 'rgba(139,124,248,0.25)';
-  const secStr    = `${String(Math.floor(secs / 60)).padStart(2, '0')}:${String(Math.floor(secs % 60)).padStart(2, '0')}`;
+  const onMic     = () => { if (phase === 'idle' || phase === 'done') start(); else if (phase === 'recording') stop(); };
+  const micColor   = phase === 'recording' ? '#FF6B6B' : COLORS.accent;
+  const ringBorder = phase === 'recording' ? 'rgba(255,107,107,0.35)' : 'rgba(139,124,248,0.28)';
+  const secStr     = `${String(Math.floor(secs / 60)).padStart(2, '0')}:${String(Math.floor(secs % 60)).padStart(2, '0')}`;
 
   return (
+    <FadeScreen>
     <SafeAreaView style={s.safe} edges={['top']}>
-
-      {/* Header */}
       <View style={s.header}>
         <Text style={s.title}>voice journal</Text>
         <Text style={s.sub}>tell me about your day</Text>
       </View>
 
-      {/* Mic — flex:1 centre stage */}
       <View style={s.micArea}>
-        <TouchableOpacity
-          onPress={onMic}
-          disabled={phase === 'processing'}
-          style={[s.ring, { borderColor: ringColor }]}
-          activeOpacity={0.85}
-        >
-          <View style={[s.micBtn, { backgroundColor: micColor }]}>
-            {phase === 'processing'
-              ? <ActivityIndicator color="#0d0b14" size="large" />
-              : <Text style={s.micIcon}>{phase === 'recording' ? '◼' : '🎙'}</Text>}
-          </View>
-        </TouchableOpacity>
+        {/* Ring with scale pulse */}
+        <Pressable onPress={onMic} disabled={phase === 'processing'}>
+          <Animated.View style={[s.ring, { borderColor: ringBorder }, ringStyle]}>
+            <View style={[s.micBtn, { backgroundColor: micColor }]}>
+              {phase === 'processing'
+                ? <ActivityIndicator color="#0d0b14" size="large" />
+                : <Text style={s.micIcon}>{phase === 'recording' ? '◼' : '🎙'}</Text>}
+            </View>
+          </Animated.View>
+        </Pressable>
 
         {phase === 'recording' && (
           <>
@@ -150,38 +282,35 @@ export default function VoiceScreen() {
         {phase === 'idle'       && <Text style={s.hint}>tap to start recording</Text>}
         {phase === 'processing' && <Text style={s.hint}>running local neural model...</Text>}
 
+        {/* Result card with slide-up entrance */}
         {phase === 'done' && result && (
-          <View style={s.resultCard}>
+          <Animated.View style={[s.resultCard, resultStyle]}>
             <Text style={s.resultBadge}>
-              {result.emotion === result.modelEmotion ? 'veil hears' : `model heard ${getEmotion(result.modelEmotion).label}`}
+              {result.emotion === result.modelEmotion
+                ? 'veil hears'
+                : `model heard ${getEmotion(result.modelEmotion).label}`}
             </Text>
             <Text style={[s.resultEmo, { color: getEmotion(result.emotion).color }]}>
               {getEmotion(result.emotion).label}
             </Text>
             <Text style={s.resultDesc}>{result.desc}</Text>
+
             <View style={s.choiceGrid}>
-              {EMOTIONS.map(e => {
-                const active = e.id === result.emotion;
-                return (
-                  <TouchableOpacity
-                    key={e.id}
-                    onPress={() => chooseEmotion(e.id)}
-                    activeOpacity={0.75}
-                    style={[
-                      s.choiceChip,
-                      active && { backgroundColor: e.color + '24', borderColor: e.color + '80' },
-                    ]}
-                  >
-                    <Text style={[s.choiceText, active && { color: e.color }]}>{e.label}</Text>
-                  </TouchableOpacity>
-                );
-              })}
+              {EMOTIONS.map(e => (
+                <ChoiceChip
+                  key={e.id} label={e.label}
+                  active={e.id === result.emotion}
+                  color={e.color}
+                  onPress={() => chooseEmotion(e.id)}
+                />
+              ))}
             </View>
+
             <View style={s.pillRow}>
               {([
                 ['confidence', `${Math.round(result.confidence * 100)}%`],
-                ['energy',     `${Math.round(result.features.energy * 100)}%`],
-                ['stability',  `${Math.round(result.features.stability * 100)}%`],
+                ['energy',     `${Math.round((result.features.energy ?? 0) * 100)}%`],
+                ['stability',  `${Math.round((result.features.stability ?? result.features.variance ?? 0) * 100)}%`],
               ] as [string, string][]).map(([l, v]) => (
                 <View key={l} style={s.pill}>
                   <Text style={s.pillLabel}>{l}</Text>
@@ -189,32 +318,33 @@ export default function VoiceScreen() {
                 </View>
               ))}
             </View>
+
             <Text style={s.privacy}>{result.modelVersion} · on-device · 0 bytes to cloud</Text>
-            <TouchableOpacity
+
+            <SaveBtn
               onPress={saveVoiceResult}
+              label={saving ? 'saving...' : 'save emotion'}
+              color={getEmotion(result.emotion).color}
               disabled={saving}
-              activeOpacity={0.85}
-              style={[s.saveBtn, { backgroundColor: getEmotion(result.emotion).color, opacity: saving ? 0.6 : 1 }]}
-            >
-              <Text style={s.saveText}>{saving ? 'saving...' : 'save emotion'}</Text>
-            </TouchableOpacity>
-          </View>
+            />
+          </Animated.View>
         )}
       </View>
 
-      {/* Recent — fixed bottom */}
+      {/* Recent entries */}
       {voiceEntries.length > 0 && (
         <View style={s.recent}>
           <Text style={s.recentLabel}>recent</Text>
           {voiceEntries.slice(0, 3).map(e => {
             const emo = getEmotion(e.detectedEmotion);
+            const corrected = (e as any).modelEmotion && (e as any).modelEmotion !== e.detectedEmotion;
             return (
               <View key={e.id} style={s.entryRow}>
                 <View style={[s.entryDot, { backgroundColor: emo.color }]} />
                 <Text style={[s.entryEmo, { color: emo.color }]}>{emo.label}</Text>
                 <Text style={s.entryMeta}>
                   {e.durationSeconds}s · {Math.round(e.confidence * 100)}%
-                  {e.modelEmotion !== e.detectedEmotion ? ' · corrected' : ''}
+                  {corrected ? ' · corrected' : ''}
                 </Text>
                 <Text style={s.entryTime}>
                   {new Date(e.createdAt).toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' })}
@@ -224,8 +354,8 @@ export default function VoiceScreen() {
           })}
         </View>
       )}
-
     </SafeAreaView>
+    </FadeScreen>
   );
 }
 
@@ -249,14 +379,12 @@ const s = StyleSheet.create({
   resultEmo:   { fontSize: 26, fontWeight: '700' },
   resultDesc:  { fontSize: 14, color: COLORS.textMuted, textAlign: 'center' },
   choiceGrid:  { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 7, marginTop: 4 },
-  choiceChip:  { borderRadius: 14, borderWidth: 1, borderColor: COLORS.border, paddingHorizontal: 10, paddingVertical: 5, backgroundColor: 'rgba(255,255,255,0.04)' },
-  choiceText:  { fontSize: 12, color: COLORS.textMuted, fontWeight: '600' },
   pillRow:     { flexDirection: 'row', gap: 10, marginTop: 4 },
   pill:        { backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6, alignItems: 'center' },
   pillLabel:   { fontSize: 10, color: COLORS.textDim },
   pillVal:     { fontSize: 14, fontWeight: '600', color: COLORS.text, marginTop: 2 },
-  privacy:     { fontSize: 11, color: COLORS.textDim, marginTop: 2 },
-  saveBtn:     { marginTop: 6, borderRadius: 14, paddingVertical: 11, paddingHorizontal: 22 },
+  privacy:     { fontSize: 11, color: COLORS.textDim },
+  saveBtn:     { marginTop: 4, borderRadius: 14, paddingVertical: 11, paddingHorizontal: 22 },
   saveText:    { fontSize: 14, fontWeight: '700', color: '#0d0b14' },
   recent:      { paddingHorizontal: 20, paddingBottom: 16 },
   recentLabel: { fontSize: 11, fontWeight: '600', letterSpacing: 0.07, textTransform: 'uppercase', color: 'rgba(255,255,255,0.3)', marginBottom: 10 },

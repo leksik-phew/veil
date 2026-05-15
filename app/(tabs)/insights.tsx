@@ -1,6 +1,8 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useEffect } from 'react';
 import { View, Text, ScrollView, StyleSheet } from 'react-native';
+import Animated, { useSharedValue, useAnimatedStyle, withTiming, withDelay, Easing } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { FadeScreen } from '../../src/components/FadeScreen';
 import { useVeilStore } from '../../src/store/useStore';
 import { COLORS, getEmotion } from '../../src/constants/emotions';
 import { buildNeuralPatterns, getPatternModelVersion, voicePatternIntensity } from '../../src/engine/patternModel';
@@ -49,6 +51,27 @@ function buildDailyMood(data: { createdAt: string; intensity: number }[]): { day
     .map(([day, vals]) => ({ day, avg: vals.reduce((a, b) => a + b, 0) / vals.length }))
     .sort((a, b) => a.day.localeCompare(b.day));
 }
+
+// ── Animated pattern bar ────────────────────────────────────────────────────
+function AnimatedBar({ value, color, delay = 0 }: { value: number; color: string; delay?: number }) {
+  const width = useSharedValue(0);
+  useEffect(() => {
+    width.value = withDelay(
+      delay,
+      withTiming(value * 100, { duration: 700, easing: Easing.out(Easing.cubic) }),
+    );
+  }, [value]);
+  const style = useAnimatedStyle(() => ({ width: `${width.value}%` as any }));
+  return (
+    <View style={ab.track}>
+      <Animated.View style={[ab.fill, style, { backgroundColor: color }]} />
+    </View>
+  );
+}
+const ab = StyleSheet.create({
+  track: { height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.08)', overflow: 'hidden' },
+  fill:  { height: '100%', borderRadius: 2 },
+});
 
 export default function InsightsScreen() {
   const { checkIns, voiceEntries } = useVeilStore(s => ({
@@ -117,7 +140,8 @@ export default function InsightsScreen() {
   }, [moodEntries, combinedStats]);
 
   return (
-    <SafeAreaView style={s.safe} edges={['top']}>
+    <FadeScreen>
+      <SafeAreaView style={s.safe} edges={['top']}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.content}>
 
         <View style={s.header}>
@@ -158,13 +182,11 @@ export default function InsightsScreen() {
         {/* ML patterns */}
         <View style={s.card}>
           <Text style={s.label}>ml patterns</Text>
-          {patterns.length > 0 ? patterns.map(c => (
+          {patterns.length > 0 ? patterns.map((c, i) => (
             <View key={c.label} style={s.corrRow}>
               <View style={{ flex: 1 }}>
                 <Text style={s.corrLabel}>{c.label}</Text>
-                <View style={s.track}>
-                  <View style={[s.fill, { width: `${Math.round(c.value * 100)}%` as any, backgroundColor: c.color }]} />
-                </View>
+                <AnimatedBar value={c.value} color={c.color} delay={i * 120} />
               </View>
               <Text style={[s.corrVal, { color: c.color }]}>{Math.round(c.value * 100)}%</Text>
             </View>
@@ -194,7 +216,8 @@ export default function InsightsScreen() {
         )}
 
       </ScrollView>
-    </SafeAreaView>
+      </SafeAreaView>
+    </FadeScreen>
   );
 }
 
