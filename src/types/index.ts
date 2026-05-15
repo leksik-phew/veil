@@ -26,10 +26,17 @@ export interface VoiceEntry {
   id: number;
   audioPath: string;
   detectedEmotion: EmotionId;
+  modelEmotion: EmotionId;
   confidence: number;
   energy: number;
   variance: number;
   tempo: number;
+  peakRatio: number;
+  dynamicRange: number;
+  attack: number;
+  silenceRatio: number;
+  stability: number;
+  modelVersion: string;
   durationSeconds: number;
   createdAt: string;
 }
@@ -39,6 +46,10 @@ export interface AudioFeatures {
   variance: number;
   tempo: number;
   peakRatio: number;
+  dynamicRange: number;
+  attack: number;
+  silenceRatio: number;
+  stability: number;
 }
 
 export interface WeeklyStats {

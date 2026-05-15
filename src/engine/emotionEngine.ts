@@ -1,15 +1,15 @@
 /**
- * Veil Emotion Engine — standalone, zero-dependency classifier.
+ * Veil Emotion Engine — standalone local neural classifier.
  *
  * Pipeline:
  *  1. expo-av records audio with isMeteringEnabled: true
  *  2. Every 100ms, amplitude (dBFS) is sampled
- *  3. extractFeatures() computes 4 signal features
- *  4. classifyEmotion() maps features → Russell valence-arousal → Plutchik emotion
+ *  3. extractFeatures() computes amplitude and dynamics features
+ *  4. classifyEmotion() runs an embedded neural model on-device
  */
 
 import type { AudioFeatures, EmotionId } from '../types';
-import { EMOTIONS } from '../constants/emotions';
+import { classifyEmotionWithLocalModel, getLocalEmotionModelVersion } from './localEmotionModel';
 
 /** Convert dBFS (-60..0) to amplitude (0..1) */
 export function dbToAmplitude(db: number): number {
@@ -18,51 +18,74 @@ export function dbToAmplitude(db: number): number {
 
 /** Extract signal features from amplitude sample array (0..1) */
 export function extractFeatures(samples: number[]): AudioFeatures {
-  if (samples.length === 0) return { energy: 0, variance: 0, tempo: 0, peakRatio: 0 };
+  const clean = samples.filter(Number.isFinite).map(s => clamp(s));
+  if (clean.length === 0) {
+    return {
+      energy: 0,
+      variance: 0,
+      tempo: 0,
+      peakRatio: 0,
+      dynamicRange: 0,
+      attack: 0,
+      silenceRatio: 1,
+      stability: 0,
+    };
+  }
 
-  const energy = samples.reduce((a, b) => a + b, 0) / samples.length;
+  const sorted = [...clean].sort((a, b) => a - b);
+  const p10 = percentile(sorted, 0.1);
+  const p50 = percentile(sorted, 0.5);
+  const p90 = percentile(sorted, 0.9);
+  const energy = clean.reduce((a, b) => a + b, 0) / clean.length;
 
   const variance = Math.sqrt(
-    samples.map(s => (s - energy) ** 2).reduce((a, b) => a + b, 0) / samples.length,
+    clean.map(s => (s - energy) ** 2).reduce((a, b) => a + b, 0) / clean.length,
   );
 
   let crossings = 0;
-  for (let i = 1; i < samples.length; i++) {
-    if ((samples[i - 1] < energy) !== (samples[i] < energy)) crossings++;
+  let positiveDelta = 0;
+  let totalDelta = 0;
+  for (let i = 1; i < clean.length; i++) {
+    if ((clean[i - 1] < p50) !== (clean[i] < p50)) crossings++;
+    const delta = clean[i] - clean[i - 1];
+    if (delta > 0) positiveDelta += delta;
+    totalDelta += Math.abs(delta);
   }
-  const tempo = Math.min(1, crossings / (samples.length * 0.5));
 
-  const peak = Math.max(...samples);
-  const peakRatio = samples.filter(s => s > peak * 0.7).length / samples.length;
+  const tempo = Math.min(1, (crossings / Math.max(clean.length - 1, 1)) * 2.4);
+  const peak = Math.max(...clean);
+  const peakThreshold = Math.max(p90 * 0.86, peak * 0.62, 0.08);
+  const peakRatio = clean.filter(s => s >= peakThreshold).length / clean.length;
+  const silenceThreshold = Math.max(0.06, p50 * 0.42);
+  const silenceRatio = clean.filter(s => s <= silenceThreshold).length / clean.length;
+  const dynamicRange = clamp((p90 - p10) * 2.4);
+  const attack = clamp((positiveDelta / Math.max(clean.length - 1, 1)) * 9);
+  const instability = clamp(variance * 2.2 + totalDelta / Math.max(clean.length - 1, 1) * 4);
 
   return {
     energy:    clamp(energy),
-    variance:  clamp(variance * 3),
+    variance:  clamp(variance * 2.8),
     tempo:     clamp(tempo),
     peakRatio: clamp(peakRatio),
+    dynamicRange,
+    attack,
+    silenceRatio: clamp(silenceRatio),
+    stability: clamp(1 - instability),
   };
 }
 
-/** Classify emotion from audio features using valence-arousal heuristics */
-export function classifyEmotion(f: AudioFeatures): { emotion: EmotionId; confidence: number } {
-  const scores: { id: EmotionId; score: number }[] = [
-    { id: 'joy',          score: f.energy * 0.4 + f.tempo * 0.35 + f.variance * 0.25 },
-    { id: 'anticipation', score: f.energy * 0.3 + f.peakRatio * 0.4 + f.tempo * 0.3 },
-    { id: 'anger',        score: f.energy * 0.45 + f.peakRatio * 0.35 + (1 - f.variance) * 0.2 },
-    { id: 'fear',         score: f.variance * 0.4 + f.tempo * 0.35 + (1 - f.peakRatio) * 0.25 },
-    { id: 'surprise',     score: f.variance * 0.5 + f.tempo * 0.3 + f.energy * 0.2 },
-    { id: 'sadness',      score: (1 - f.energy) * 0.4 + (1 - f.tempo) * 0.35 + (1 - f.variance) * 0.25 },
-    { id: 'disgust',      score: (1 - f.energy) * 0.35 + (1 - f.tempo) * 0.3 + f.variance * 0.35 },
-    { id: 'trust',        score: (1 - Math.abs(f.energy - 0.45)) * 0.4 + (1 - f.tempo) * 0.3 + (1 - f.variance) * 0.3 },
-  ];
+/** Classify emotion from audio features using the bundled on-device model */
+export function classifyEmotion(f: AudioFeatures): {
+  emotion: EmotionId;
+  confidence: number;
+  probabilities: Record<EmotionId, number>;
+  modelVersion: string;
+} {
+  return classifyEmotionWithLocalModel(f);
+}
 
-  const max = Math.max(...scores.map(s => s.score));
-  const exps = scores.map(s => ({ ...s, e: Math.exp((s.score - max) * 5) }));
-  const sum = exps.reduce((a, b) => a + b.e, 0);
-  const probs = exps.map(s => ({ id: s.id, p: s.e / sum })).sort((a, b) => b.p - a.p);
-
-  const confidence = clamp(0.55 + (probs[0].p - probs[1].p) * 0.4, 0.55, 0.95);
-  return { emotion: probs[0].id as EmotionId, confidence };
+export function emotionModelVersion() {
+  return getLocalEmotionModelVersion();
 }
 
 export function featureDescription(f: AudioFeatures): string {
@@ -73,7 +96,18 @@ export function featureDescription(f: AudioFeatures): string {
   else if (f.tempo < 0.3)   parts.push('slow pace');
   if (f.variance > 0.5)     parts.push('expressive tone');
   else if (f.variance < 0.2) parts.push('steady tone');
+  if (f.silenceRatio > 0.35) parts.push('long pauses');
+  if (f.attack > 0.55)       parts.push('sharp changes');
   return parts.join(' · ') || 'neutral delivery';
+}
+
+function percentile(sorted: number[], p: number) {
+  if (sorted.length === 1) return sorted[0];
+  const idx = (sorted.length - 1) * p;
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  const mix = idx - lo;
+  return sorted[lo] * (1 - mix) + sorted[hi] * mix;
 }
 
 function clamp(v: number, min = 0, max = 1) {

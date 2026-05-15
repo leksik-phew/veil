@@ -34,30 +34,44 @@ export async function fetchDailyMood(days = 14): Promise<{ day: string; avg: num
 }
 
 export async function insertVoiceEntry(
-  audioPath: string, detectedEmotion: EmotionId, confidence: number,
-  features: AudioFeatures, durationSeconds: number,
+  audioPath: string, detectedEmotion: EmotionId, modelEmotion: EmotionId, confidence: number,
+  features: AudioFeatures, durationSeconds: number, modelVersion: string,
 ): Promise<number> {
   const r = await getDb().runAsync(
-    `INSERT INTO voice_entries (audio_path,detected_emotion,confidence,energy,variance,tempo,duration_seconds)
-     VALUES (?,?,?,?,?,?,?)`,
-    audioPath, detectedEmotion, confidence,
-    features.energy, features.variance, features.tempo, durationSeconds,
+    `INSERT INTO voice_entries (
+       audio_path,detected_emotion,model_emotion,confidence,energy,variance,tempo,peak_ratio,
+       dynamic_range,attack,silence_ratio,stability,model_version,duration_seconds
+     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    audioPath, detectedEmotion, modelEmotion, confidence,
+    features.energy, features.variance, features.tempo, features.peakRatio,
+    features.dynamicRange, features.attack, features.silenceRatio, features.stability,
+    modelVersion, durationSeconds,
   );
   return r.lastInsertRowId;
 }
 
 export async function fetchVoiceEntries(limit = 20): Promise<VoiceEntry[]> {
   const rows = await getDb().getAllAsync<{
-    id: number; audio_path: string; detected_emotion: string;
+    id: number; audio_path: string; detected_emotion: string; model_emotion: string;
     confidence: number; energy: number; variance: number;
-    tempo: number; duration_seconds: number; created_at: string;
+    tempo: number; peak_ratio: number; dynamic_range: number;
+    attack: number; silence_ratio: number; stability: number;
+    model_version: string;
+    duration_seconds: number; created_at: string;
   }>(`SELECT * FROM voice_entries ORDER BY created_at DESC LIMIT ?`, limit);
 
   return rows.map(r => ({
     id: r.id, audioPath: r.audio_path,
     detectedEmotion: r.detected_emotion as EmotionId,
+    modelEmotion: (r.model_emotion || r.detected_emotion) as EmotionId,
     confidence: r.confidence, energy: r.energy,
     variance: r.variance, tempo: r.tempo,
+    peakRatio: r.peak_ratio ?? 0,
+    dynamicRange: r.dynamic_range ?? 0,
+    attack: r.attack ?? 0,
+    silenceRatio: r.silence_ratio ?? 0,
+    stability: r.stability ?? 0,
+    modelVersion: r.model_version ?? 'legacy',
     durationSeconds: r.duration_seconds, createdAt: r.created_at,
   }));
 }

@@ -26,7 +26,7 @@
 
 ## Overview
 
-Veil is a React Native (Expo) mobile application for iOS and Android that helps users track their emotional state through daily check-ins, voice journaling, and guided breathing exercises. It surfaces patterns over time — correlations between triggers and emotions, weekly mood calendars, and day-of-week insights — entirely on-device without sending a single byte to any server.
+Veil is a React Native (Expo) mobile application for iOS and Android that helps users track their emotional state through daily check-ins, voice journaling, and guided breathing exercises. It surfaces patterns over time — ML-scored trigger/emotion patterns, weekly mood calendars, and day-of-week insights — entirely on-device without sending a single byte to any server.
 
 The name is intentional: emotions are often the veil that obscures our real state from ourselves. The app exists to help lift it.
 
@@ -37,8 +37,8 @@ The name is intentional: emotions are often the veil that obscures our real stat
 ### Privacy-first by design
 All user data lives exclusively in an SQLite database on the device. Audio recordings are stored in the local filesystem. There are no accounts, no cloud sync, no analytics, no third-party SDKs. The app works with no internet connection at all.
 
-### Zero external ML dependencies
-The emotion classifier (`src/engine/emotionEngine.ts`) is a standalone signal-processing module written in plain TypeScript. It requires no models, no network calls, no TensorFlow or ONNX runtime. It processes raw audio amplitude data from `expo-av`'s metering API and maps acoustic features onto Robert Plutchik's emotion model using James Russell's valence–arousal circumplex.
+### On-device ML, no network
+Emotion detection runs through a bundled local neural model (`src/engine/localEmotionModel.ts`) written in plain TypeScript. It requires no network calls, no TensorFlow, and no ONNX runtime. Patterns are scored by a second local model (`src/engine/patternModel.ts`) that learns from the user's own check-in history on the device.
 
 ### No state management library
 The global store (`src/store/useStore.ts`) is implemented from scratch using React's `useState` and `useEffect`. It provides a Zustand-like selector API without any external dependency — and without `import.meta`, which is incompatible with Hermes (React Native's JS engine).
@@ -72,8 +72,8 @@ A 10-week × 7-day GitHub-style contribution graph. Each cell is colored by aver
 **Veil Notices (insight callout)**  
 Appears automatically when ≥5 check-ins exist. Finds the day of the week with the lowest average intensity vs the highest, and generates a human-readable sentence: *"Mondays tend to be harder — mood is 34% lower than on Fridays."*
 
-**Your Patterns (correlations)**  
-For each trigger the user has logged, finds the emotion that co-occurs most frequently with that trigger. Uses statistical lift (`observed rate / baseline rate`) to score the correlation strength, normalised to a 35–95% range. Shows up to 4 top patterns. Replaces hardcoded placeholder data with real user analytics.
+**ML Patterns**  
+For each trigger the user has logged, the local pattern model combines frequency, emotional lift, intensity, recency, and consistency into a neural score. Shows up to 4 top patterns, fully on-device.
 
 **Overview stats grid**  
 Four cards: total entries, current day streak, average intensity (last 7 days), top emotion.
@@ -83,10 +83,11 @@ Full recording flow using `expo-av`:
 1. Requests microphone permission on first use.
 2. Records with `isMeteringEnabled: true` — captures amplitude every 100ms.
 3. Live animated waveform updates in real time from metering data (via `useState`, not `ref`).
-4. On stop, passes amplitude samples through the emotion engine.
-5. Shows detected emotion, confidence score, energy level, and variance.
-6. Saves audio path + all features to the `voice_entries` table.
-7. Displays the last 3 recordings below the mic.
+4. On stop, passes amplitude samples through the local neural emotion model.
+5. Shows the model prediction, confidence score, energy level, stability, and model version.
+6. Lets the user confirm or correct the emotion before saving.
+7. Saves the final emotion, original model prediction, audio path, features, and ML metadata to the `voice_entries` table.
+8. Displays the last 3 recordings below the mic.
 
 ### ◌ Breathe
 A guided 4-7-8 breathing exercise:
@@ -113,7 +114,8 @@ A guided 4-7-8 breathing exercise:
 | Gestures           | react-native-gesture-handler             | ~2.28.0      |
 | Vector graphics    | react-native-svg                         | 15.12.1      |
 | State management   | Custom pub-sub hook (zero deps)          | —            |
-| Emotion classifier | Custom signal-processing engine (zero deps) | —         |
+| Emotion classifier | Local TypeScript prototype network (zero runtime deps) | — |
+| Pattern scoring    | Local TypeScript ML model (zero runtime deps) | —       |
 | Date utilities     | date-fns                                 | ^4.1.0       |
 
 ---
@@ -140,7 +142,9 @@ veil/
 │   │   └── emotions.ts           # Plutchik emotions, trigger list, color palette
 │   │
 │   ├── engine/
-│   │   └── emotionEngine.ts      # Standalone audio → emotion classifier
+│   │   ├── emotionEngine.ts      # Audio features + model facade
+│   │   ├── localEmotionModel.ts  # Embedded local audio emotion prototype net
+│   │   └── patternModel.ts       # Embedded local pattern scoring model
 │   │
 │   ├── db/
 │   │   ├── database.ts           # SQLite init, schema, migrations
@@ -240,7 +244,7 @@ onFinalize: clear hover (gesture cancelled)
 
 **File:** `src/engine/emotionEngine.ts`
 
-A fully self-contained, zero-dependency emotion classifier. No ML models, no runtimes, no network.
+A fully self-contained, zero-runtime-dependency emotion classifier. The model is bundled in the app as TypeScript weights and runs locally in JavaScript. No network request is made.
 
 ### Theoretical basis
 
@@ -265,53 +269,61 @@ function dbToAmplitude(db: number): number {
 Samples are collected every 100ms during recording, resulting in ~10 samples/second.
 
 #### Step 2: Feature extraction
-Four acoustic features are computed from the amplitude sample array:
+The engine computes amplitude and dynamics features from the metering sample array:
 
 | Feature | Formula | Psychological meaning |
 |---------|---------|----------------------|
 | `energy` | mean amplitude | overall activation level, loudness |
-| `variance` | σ of amplitudes × 3 | emotional expressiveness, pitch variation |
-| `tempo` | zero-crossing rate / (N × 0.5) | speaking speed, agitation |
-| `peakRatio` | fraction of samples above 70% of peak | sustained loudness, intensity of peaks |
+| `variance` | σ of amplitudes × 2.8 | emotional expressiveness, volume variation |
+| `tempo` | median-crossing rate | speaking pace / agitation proxy |
+| `peakRatio` | fraction of samples near upper peaks | sustained loudness |
+| `dynamicRange` | p90 - p10 amplitude range | contrast between quiet and loud parts |
+| `attack` | average positive amplitude delta | sharpness of vocal changes |
+| `silenceRatio` | fraction below quiet threshold | pauses, withdrawal, hesitation |
+| `stability` | inverse of variance + movement | calm / steady delivery |
 
-#### Step 3: Scoring
-Each of the 8 emotions gets a weighted score based on the features, derived from the valence–arousal positions in Russell's model:
-
-```
-joy:           energy×0.4 + tempo×0.35 + variance×0.25
-anger:         energy×0.45 + peakRatio×0.35 + (1-variance)×0.2
-sadness:       (1-energy)×0.4 + (1-tempo)×0.35 + (1-variance)×0.25
-fear:          variance×0.4 + tempo×0.35 + (1-peakRatio)×0.25
-surprise:      variance×0.5 + tempo×0.3 + energy×0.2
-anticipation:  energy×0.3 + peakRatio×0.4 + tempo×0.3
-trust:         (1-|energy-0.45|)×0.4 + (1-tempo)×0.3 + (1-variance)×0.3
-disgust:       (1-energy)×0.35 + (1-tempo)×0.3 + variance×0.35
-```
-
-#### Step 4: Softmax normalisation
-Scores are converted to probabilities via softmax with temperature scaling (×5), which amplifies separation between close scores:
+#### Step 3: Local neural inference
+`src/engine/localEmotionModel.ts` projects those features into a 10-value model input:
 
 ```typescript
-const expScores = scores.map(s => Math.exp((s.score - maxScore) * 5));
-const probs     = expScores.map(e => e / sum);
+[arousal, valenceProxy, energy, variance, tempo, peakRatio, dynamicRange, attack, silenceRatio, stability]
+```
+
+The vector runs through a calibrated prototype network:
+- each emotion has a weighted acoustic prototype
+- weighted distances become emotion logits
+- softmax turns logits into probabilities
+- confidence is capped and margin-based so weak evidence stays uncertain
+
+#### Step 4: Softmax normalisation
+Logits are converted to probabilities via softmax with temperature scaling:
+
+```typescript
+const probs = softmax(logits, 0.68);
 ```
 
 #### Step 5: Confidence
-Confidence is derived from the gap between the top probability and the runner-up, scaled to a realistic 55–95% range:
+Confidence is derived from the gap between the top probability and the runner-up, scaled to a realistic 42–92% range:
 
 ```typescript
-confidence = 0.55 + (probs[0] - probs[1]) * 0.4
+confidence = 0.42 + margin * 0.92 + topProbability * 0.18
 ```
 
-This avoids false certainty (never reaches 100%) while staying above a meaningful floor (never below 55% when a clear winner exists).
+This avoids false certainty while still surfacing when the model has a clear winner.
 
-### Accuracy
+### Pattern Model
 
-This is heuristic signal-processing, not deep learning. Typical accuracy:
-- **High-contrast states** (calm vs angry, sad vs joyful): ~70–80%
-- **Similar-arousal states** (fear vs surprise): ~55–65%
+**File:** `src/engine/patternModel.ts`
 
-For a portfolio project this is intentional and honest — it demonstrates audio analysis skills without pretending to replace a trained model.
+The patterns screen also uses a local ML scoring model. For each trigger-emotion candidate it builds these features:
+- support size
+- emotional lift against the user's baseline
+- intensity delta against the user's baseline
+- recency
+- consistency
+- reliability with Bayesian smoothing
+
+Those features pass through a compact Bayesian/logistic model and are normalised to a 25-93% display range. The model version is shown in the UI as `veil-pattern-bayes-net-v2`.
 
 ---
 
@@ -338,11 +350,18 @@ For a portfolio project this is intentional and honest — it demonstrates audio
 |--------|------|-------|
 | `id` | INTEGER PK | autoincrement |
 | `audio_path` | TEXT | local file URI from expo-av |
-| `detected_emotion` | TEXT | EmotionId from emotion engine |
-| `confidence` | REAL | 0.55–0.95 |
+| `detected_emotion` | TEXT | final saved EmotionId after optional correction |
+| `model_emotion` | TEXT | original EmotionId predicted by the local model |
+| `confidence` | REAL | 0.42–0.92 |
 | `energy` | REAL | 0–1 acoustic feature |
 | `variance` | REAL | 0–1 acoustic feature |
 | `tempo` | REAL | 0–1 acoustic feature |
+| `peak_ratio` | REAL | 0–1 acoustic feature |
+| `dynamic_range` | REAL | 0–1 acoustic feature |
+| `attack` | REAL | 0–1 acoustic feature |
+| `silence_ratio` | REAL | 0–1 acoustic feature |
+| `stability` | REAL | 0–1 acoustic feature |
+| `model_version` | TEXT | local model version used for inference |
 | `duration_seconds` | INTEGER | recording length |
 | `created_at` | TEXT | ISO string |
 
@@ -357,7 +376,7 @@ Both indexes support the common query pattern: "fetch last N records, ordered ne
 
 ### Analytics queries
 
-**Daily mood** (`fetchDailyMood`): Groups check-ins by `date(created_at)`, computes `AVG(intensity)` per day for the last N days. Powers both the 14-day bar chart (deleted, replaced by heatmap) and the 70-day heatmap.
+**Daily mood** (`insights.tsx`): Combines manual check-ins and confirmed voice entries by `date(created_at)`, then computes average intensity per day for the 10-week heatmap. Voice entry intensity is estimated locally from acoustic arousal features.
 
 **Weekly stats** (`computeWeeklyStats`):
 - Total entry count
@@ -366,11 +385,11 @@ Both indexes support the common query pattern: "fetch last N records, ordered ne
 - Top emotion: `GROUP BY emotion ORDER BY COUNT(*) DESC LIMIT 1`
 - Top trigger: triggers are stored as JSON arrays → parsed in JS → frequency counted in a `Record<string, number>`
 
-**Correlations** (computed in `insights.tsx` via `useMemo`):
-- For each trigger, finds the most co-occurring emotion
-- Computes statistical lift: `(co-occurrence rate) / (base rate of emotion overall)`
-- Lift > 1 means the trigger predicts the emotion more than chance
-- Normalised to 35–95% display range: `0.4 + (lift - 1) × 0.22`
+**ML patterns** (`src/engine/patternModel.ts`):
+- Groups check-ins by trigger and confirmed voice entries under the `voice journal` source
+- Finds the top co-occurring emotion per trigger
+- Builds ML features from support, lift, intensity delta, recency, consistency, and reliability
+- Scores each candidate with the bundled local model and shows the top 4
 
 ---
 
@@ -450,9 +469,9 @@ Two-step flow controlled by `step: 1 | 2` state. No ScrollView — each step fil
 
 ### `app/(tabs)/insights.tsx` — Patterns
 
-`ScrollView` wrapper around four blocks: heatmap card, insight callout (conditional), correlations card, stats grid. Scrolling is intentional — data can grow as the user adds more check-ins.
+`ScrollView` wrapper around four blocks: heatmap card, insight callout (conditional), ML patterns card, stats grid. Scrolling is intentional — data can grow as the user adds more check-ins and voice entries.
 
-The heatmap builds a `(number | undefined)[][]` grid (10 rows × 7 cols) from `heatmapData` by anchoring to the current week's Sunday and iterating backwards. Future dates are `undefined` → transparent cells.
+The heatmap builds a `(number | undefined)[][]` grid (10 rows × 7 cols) from combined manual + voice mood data by anchoring to the current week's Sunday and iterating backwards. Future dates are `undefined` → transparent cells.
 
 ### `app/(tabs)/voice.tsx` — Voice Journal
 
@@ -632,7 +651,7 @@ Features planned but not yet implemented:
 - **Home screen widget** — one-tap check-in from the iOS/Android home screen using `expo-quick-actions` or a native widget extension
 - **Data export** — download all check-ins as JSON or CSV using `expo-sharing`
 - **Sleep + energy tracking** — two additional sliders on step 1 of check-in; feeds real sleep→mood correlation into the patterns screen
-- **Personalised ML** — replace the heuristic engine with a TFLite model trained on the user's own voice data using federated learning (on-device fine-tuning)
+- **Personalised ML** — fine-tune the bundled local models from the user's own labelled history, entirely on-device
 - **Themes** — light mode and alternative accent color options
 - **iCloud / local backup** — opt-in database export to iCloud Drive (not sync — just backup)
 
@@ -646,6 +665,6 @@ Veil was designed from the ground up with privacy as a constraint, not an aftert
 - **No network requests.** The app never opens a network connection. There is no telemetry, no crash reporting, no analytics.
 - **No third-party SDKs.** Every dependency is open-source and ships no tracking code.
 - **Local storage only.** The SQLite database (`veil.db`) lives in the app's sandboxed document directory. Audio files are stored in the same sandbox. Both are deleted when the app is uninstalled.
-- **On-device processing.** The emotion classifier runs entirely in JavaScript on the device. Audio is never transmitted anywhere.
+- **On-device processing.** Emotion detection and pattern scoring run entirely in JavaScript on the device. Audio is never transmitted anywhere.
 
 Zero bytes leave the device.

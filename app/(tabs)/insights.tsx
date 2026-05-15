@@ -3,6 +3,7 @@ import { View, Text, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useVeilStore } from '../../src/store/useStore';
 import { COLORS, getEmotion } from '../../src/constants/emotions';
+import { buildNeuralPatterns, getPatternModelVersion, voicePatternIntensity } from '../../src/engine/patternModel';
 import type { EmotionId } from '../../src/types';
 
 const DOW_SHORT = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
@@ -38,45 +39,68 @@ function buildGrid(data: { day: string; avg: number }[], weeks = 10): (number | 
   return grid;
 }
 
+function buildDailyMood(data: { createdAt: string; intensity: number }[]): { day: string; avg: number }[] {
+  const byDay: Record<string, number[]> = {};
+  for (const entry of data) {
+    const day = new Date(entry.createdAt).toISOString().slice(0, 10);
+    (byDay[day] = byDay[day] ?? []).push(entry.intensity);
+  }
+  return Object.entries(byDay)
+    .map(([day, vals]) => ({ day, avg: vals.reduce((a, b) => a + b, 0) / vals.length }))
+    .sort((a, b) => a.day.localeCompare(b.day));
+}
+
 export default function InsightsScreen() {
-  const { stats, checkIns, heatmapData } = useVeilStore(s => ({
-    stats: s.stats, checkIns: s.checkIns, heatmapData: s.heatmapData,
+  const { checkIns, voiceEntries } = useVeilStore(s => ({
+    checkIns: s.checkIns, voiceEntries: s.voiceEntries,
   }));
 
-  const heatGrid = useMemo(() => buildGrid(heatmapData, 10), [heatmapData]);
+  const moodEntries = useMemo(() => [
+    ...checkIns.map(entry => ({
+      createdAt: entry.createdAt,
+      intensity: entry.intensity,
+      emotion: entry.emotion,
+    })),
+    ...voiceEntries.map(entry => ({
+      createdAt: entry.createdAt,
+      intensity: voicePatternIntensity(entry),
+      emotion: entry.detectedEmotion,
+    })),
+  ], [checkIns, voiceEntries]);
 
-  const correlations = useMemo(() => {
-    if (checkIns.length < 3) return [];
-    const map: Record<string, Record<string, number>> = {};
-    const globalEmo: Record<string, number> = {};
-    for (const c of checkIns) {
-      globalEmo[c.emotion] = (globalEmo[c.emotion] ?? 0) + 1;
-      for (const t of c.triggers) {
-        if (!map[t]) map[t] = {};
-        map[t][c.emotion] = (map[t][c.emotion] ?? 0) + 1;
-      }
+  const combinedStats = useMemo(() => {
+    const emotionCounts: Record<string, number> = {};
+    for (const entry of moodEntries) emotionCounts[entry.emotion] = (emotionCounts[entry.emotion] ?? 0) + 1;
+    const topEmotion = Object.entries(emotionCounts).sort((a, b) => b[1] - a[1])[0]?.[0] as EmotionId | undefined;
+    const lastWeek = moodEntries.filter(entry => Date.now() - new Date(entry.createdAt).getTime() <= 7 * 86400000);
+    const avg = lastWeek.reduce((sum, entry) => sum + entry.intensity, 0) / Math.max(lastWeek.length, 1);
+    const days = Array.from(new Set(moodEntries.map(entry => new Date(entry.createdAt).toISOString().slice(0, 10)))).sort().reverse();
+    let streak = 0;
+    const today = new Date();
+    for (let i = 0; i < days.length; i++) {
+      const exp = new Date(today);
+      exp.setDate(today.getDate() - i);
+      if (days[i] === exp.toISOString().slice(0, 10)) streak++;
+      else break;
     }
-    const total  = checkIns.length;
-    const results: { label: string; value: number; color: string }[] = [];
-    for (const [trigger, emos] of Object.entries(map)) {
-      const top = Object.entries(emos).sort((a, b) => b[1] - a[1])[0];
-      if (!top) continue;
-      const [emoId, count] = top;
-      const trigTotal = Object.values(emos).reduce((a, b) => a + b, 0);
-      const lift = (count / Math.max(trigTotal, 1)) / Math.max((globalEmo[emoId] ?? 0) / total, 0.01);
-      results.push({
-        label: `${trigger} → ${getEmotion(emoId as EmotionId).label}`,
-        value: Math.min(0.95, Math.max(0.35, 0.4 + (lift - 1) * 0.22)),
-        color: getEmotion(emoId as EmotionId).color,
-      });
-    }
-    return results.sort((a, b) => b.value - a.value).slice(0, 4);
-  }, [checkIns]);
+    return {
+      totalEntries: moodEntries.length,
+      streak,
+      averageIntensity: Math.round(avg * 10) / 10,
+      topEmotion: topEmotion ?? null,
+    };
+  }, [moodEntries]);
+
+  const heatGrid = useMemo(() => buildGrid(buildDailyMood(moodEntries), 10), [moodEntries]);
+
+  const patterns = useMemo(() => {
+    return buildNeuralPatterns(checkIns, voiceEntries);
+  }, [checkIns, voiceEntries]);
 
   const insight = useMemo(() => {
-    if (checkIns.length < 5) return null;
+    if (moodEntries.length < 5) return null;
     const byDow: Record<number, number[]> = {};
-    for (const c of checkIns) {
+    for (const c of moodEntries) {
       const dow = new Date(c.createdAt).getDay();
       (byDow[dow] = byDow[dow] ?? []).push(c.intensity);
     }
@@ -88,9 +112,9 @@ export default function InsightsScreen() {
       const pct = Math.round(((best.avg - worst.avg) / Math.max(best.avg, 0.01)) * 100);
       return `${DOW_FULL[worst.d]}s tend to be harder — mood is ${pct}% lower than on ${DOW_FULL[best.d]}s`;
     }
-    if (stats?.topEmotion) return `Your most frequent emotion lately is ${getEmotion(stats.topEmotion).label}`;
+    if (combinedStats.topEmotion) return `Your most frequent emotion lately is ${getEmotion(combinedStats.topEmotion).label}`;
     return null;
-  }, [checkIns, stats]);
+  }, [moodEntries, combinedStats]);
 
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
@@ -131,10 +155,10 @@ export default function InsightsScreen() {
           </View>
         )}
 
-        {/* Correlations */}
+        {/* ML patterns */}
         <View style={s.card}>
-          <Text style={s.label}>{correlations.length > 0 ? 'your patterns' : 'correlations'}</Text>
-          {correlations.length > 0 ? correlations.map(c => (
+          <Text style={s.label}>ml patterns</Text>
+          {patterns.length > 0 ? patterns.map(c => (
             <View key={c.label} style={s.corrRow}>
               <View style={{ flex: 1 }}>
                 <Text style={s.corrLabel}>{c.label}</Text>
@@ -145,18 +169,21 @@ export default function InsightsScreen() {
               <Text style={[s.corrVal, { color: c.color }]}>{Math.round(c.value * 100)}%</Text>
             </View>
           )) : (
-            <Text style={s.corrEmpty}>Add check-ins with triggers to see your personal patterns here</Text>
+            <Text style={s.corrEmpty}>Add check-ins or confirmed voice entries to see your personal patterns here</Text>
+          )}
+          {patterns.length > 0 && (
+            <Text style={s.modelTag}>{getPatternModelVersion()} · on-device</Text>
           )}
         </View>
 
         {/* Stats 2×2 */}
-        {stats && (
+        {combinedStats && (
           <View style={s.statsGrid}>
             {[
-              { label: 'total entries', val: String(stats.totalEntries) },
-              { label: 'day streak',    val: String(stats.streak) },
-              { label: 'avg intensity', val: stats.averageIntensity > 0 ? `${stats.averageIntensity}/10` : '—' },
-              { label: 'top emotion',   val: stats.topEmotion ? getEmotion(stats.topEmotion).label : '—' },
+              { label: 'total entries', val: String(combinedStats.totalEntries) },
+              { label: 'day streak',    val: String(combinedStats.streak) },
+              { label: 'avg intensity', val: combinedStats.averageIntensity > 0 ? `${combinedStats.averageIntensity}/10` : '—' },
+              { label: 'top emotion',   val: combinedStats.topEmotion ? getEmotion(combinedStats.topEmotion).label : '—' },
             ].map(item => (
               <View key={item.label} style={s.statCard}>
                 <Text style={s.statLabel}>{item.label}</Text>
@@ -190,13 +217,14 @@ const s = StyleSheet.create({
   callout:      { borderLeftWidth: 2, borderLeftColor: COLORS.accent, paddingLeft: 16 },
   calloutBadge: { fontSize: 12, color: COLORS.textMuted, marginBottom: 6 },
   calloutText:  { fontSize: 14, color: 'rgba(255,255,255,0.85)', lineHeight: 22 },
-  // Correlations
+  // ML patterns
   corrRow:      { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
   corrLabel:    { fontSize: 14, color: 'rgba(255,255,255,0.75)', marginBottom: 7 },
   track:        { height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.08)', overflow: 'hidden' },
   fill:         { height: '100%', borderRadius: 2 },
   corrVal:      { fontSize: 14, fontWeight: '600', minWidth: 40, textAlign: 'right' },
   corrEmpty:    { fontSize: 14, color: COLORS.textMuted, lineHeight: 22 },
+  modelTag:     { fontSize: 11, color: COLORS.textDim, marginTop: 2 },
   // Stats
   statsGrid:    { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   statCard:     { width: '47.5%', backgroundColor: COLORS.card, borderRadius: 16, borderWidth: 0.5, borderColor: COLORS.border, padding: 16 },

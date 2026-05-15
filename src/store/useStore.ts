@@ -18,7 +18,15 @@ interface VeilStore {
   loading:      boolean;
   loadAll:       () => Promise<void>;
   addCheckIn:    (emotion: EmotionId, intensity: number, triggers: TriggerId[], note: string) => Promise<void>;
-  addVoiceEntry: (audioPath: string, emotion: EmotionId, confidence: number, features: AudioFeatures, duration: number) => Promise<void>;
+  addVoiceEntry: (
+    audioPath: string,
+    emotion: EmotionId,
+    modelEmotion: EmotionId,
+    confidence: number,
+    features: AudioFeatures,
+    duration: number,
+    modelVersion: string,
+  ) => Promise<void>;
 }
 
 type Listener = () => void;
@@ -47,8 +55,16 @@ Object.assign(state, {
     await insertCheckIn(emotion, intensity, triggers, note);
     await state.loadAll();
   },
-  addVoiceEntry: async (audioPath: string, emotion: EmotionId, confidence: number, features: AudioFeatures, duration: number) => {
-    await insertVoiceEntry(audioPath, emotion, confidence, features, duration);
+  addVoiceEntry: async (
+    audioPath: string,
+    emotion: EmotionId,
+    modelEmotion: EmotionId,
+    confidence: number,
+    features: AudioFeatures,
+    duration: number,
+    modelVersion: string,
+  ) => {
+    await insertVoiceEntry(audioPath, emotion, modelEmotion, confidence, features, duration, modelVersion);
     await state.loadAll();
   },
 });

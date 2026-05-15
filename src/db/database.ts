@@ -20,10 +20,17 @@ export async function initDatabase(): Promise<void> {
       id               INTEGER PRIMARY KEY AUTOINCREMENT,
       audio_path       TEXT    NOT NULL DEFAULT '',
       detected_emotion TEXT    NOT NULL,
+      model_emotion    TEXT    NOT NULL DEFAULT '',
       confidence       REAL    NOT NULL DEFAULT 0,
       energy           REAL    NOT NULL DEFAULT 0,
       variance         REAL    NOT NULL DEFAULT 0,
       tempo            REAL    NOT NULL DEFAULT 0,
+      peak_ratio       REAL    NOT NULL DEFAULT 0,
+      dynamic_range    REAL    NOT NULL DEFAULT 0,
+      attack           REAL    NOT NULL DEFAULT 0,
+      silence_ratio    REAL    NOT NULL DEFAULT 0,
+      stability        REAL    NOT NULL DEFAULT 0,
+      model_version    TEXT    NOT NULL DEFAULT 'legacy',
       duration_seconds INTEGER NOT NULL DEFAULT 0,
       created_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
     );
@@ -31,6 +38,30 @@ export async function initDatabase(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_checkins_created ON checkins(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_voice_created    ON voice_entries(created_at DESC);
   `);
+
+  const columns = await _db.getAllAsync<{ name: string }>(`PRAGMA table_info(voice_entries)`);
+  const names = new Set(columns.map(c => c.name));
+  if (!names.has('peak_ratio')) {
+    await _db.execAsync(`ALTER TABLE voice_entries ADD COLUMN peak_ratio REAL NOT NULL DEFAULT 0;`);
+  }
+  if (!names.has('model_emotion')) {
+    await _db.execAsync(`ALTER TABLE voice_entries ADD COLUMN model_emotion TEXT NOT NULL DEFAULT '';`);
+  }
+  if (!names.has('dynamic_range')) {
+    await _db.execAsync(`ALTER TABLE voice_entries ADD COLUMN dynamic_range REAL NOT NULL DEFAULT 0;`);
+  }
+  if (!names.has('attack')) {
+    await _db.execAsync(`ALTER TABLE voice_entries ADD COLUMN attack REAL NOT NULL DEFAULT 0;`);
+  }
+  if (!names.has('silence_ratio')) {
+    await _db.execAsync(`ALTER TABLE voice_entries ADD COLUMN silence_ratio REAL NOT NULL DEFAULT 0;`);
+  }
+  if (!names.has('stability')) {
+    await _db.execAsync(`ALTER TABLE voice_entries ADD COLUMN stability REAL NOT NULL DEFAULT 0;`);
+  }
+  if (!names.has('model_version')) {
+    await _db.execAsync(`ALTER TABLE voice_entries ADD COLUMN model_version TEXT NOT NULL DEFAULT 'legacy';`);
+  }
 }
 
 export function getDb(): SQLite.SQLiteDatabase {
