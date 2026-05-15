@@ -9,16 +9,18 @@ export default function JournalScreen() {
   const checkIns = useVeilStore(s => s.checkIns);
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
+      <View style={s.header}>
+        <Text style={s.title}>journal</Text>
+        <View style={s.badge}>
+          <Text style={s.badgeText}>{checkIns.length}</Text>
+        </View>
+      </View>
+
       <FlatList
+        style={s.list}
         data={checkIns}
         keyExtractor={item => String(item.id)}
         renderItem={({ item }) => <EntryCard entry={item} />}
-        ListHeaderComponent={
-          <View style={s.header}>
-            <Text style={s.title}>journal</Text>
-            <Text style={s.sub}>{checkIns.length} entries</Text>
-          </View>
-        }
         ListEmptyComponent={
           <View style={s.empty}>
             <Text style={s.emptyIcon}>◎</Text>
@@ -26,7 +28,7 @@ export default function JournalScreen() {
             <Text style={s.emptySub}>do your first check-in</Text>
           </View>
         }
-        contentContainerStyle={s.list}
+        contentContainerStyle={s.listContent}
         showsVerticalScrollIndicator={false}
       />
     </SafeAreaView>
@@ -34,13 +36,15 @@ export default function JournalScreen() {
 }
 
 const s = StyleSheet.create({
-  safe:      { flex: 1, backgroundColor: COLORS.bg },
-  header:    { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 16 },
-  title:     { fontSize: 22, fontWeight: '600', color: COLORS.text, letterSpacing: -0.3 },
-  sub:       { fontSize: 13, color: COLORS.textDim, marginTop: 2 },
-  list:      { paddingHorizontal: 4, paddingBottom: 32 },
-  empty:     { alignItems: 'center', marginTop: 80, gap: 8 },
-  emptyIcon: { fontSize: 40, color: COLORS.textDim },
-  emptyText: { fontSize: 16, color: COLORS.textMuted },
-  emptySub:  { fontSize: 13, color: COLORS.textDim },
+  safe:        { flex: 1, backgroundColor: COLORS.bg },
+  header:      { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingTop: 24, paddingBottom: 16 },
+  title:       { fontSize: 26, fontWeight: '600', color: COLORS.text, letterSpacing: -0.5 },
+  badge:       { backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },
+  badgeText:   { fontSize: 14, color: COLORS.textMuted, fontWeight: '500' },
+  list:        { flex: 1 },
+  listContent: { paddingHorizontal: 8, paddingBottom: 24 },
+  empty:       { alignItems: 'center', marginTop: 100, gap: 10 },
+  emptyIcon:   { fontSize: 44, color: COLORS.textDim },
+  emptyText:   { fontSize: 17, color: COLORS.textMuted },
+  emptySub:    { fontSize: 14, color: COLORS.textDim },
 });
