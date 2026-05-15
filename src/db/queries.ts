@@ -1,5 +1,5 @@
 import { getDb } from './database';
-import type { CheckIn, VoiceEntry, EmotionId, TriggerId, WeeklyStats, AudioFeatures, ThemeMode } from '../types';
+import type { CheckIn, VoiceEntry, EmotionId, TriggerId, WeeklyStats, AudioFeatures, ThemeMode, FineTuningState } from '../types';
 
 export async function insertCheckIn(
   emotion: EmotionId, intensity: number, triggers: TriggerId[], note: string,
@@ -106,6 +106,32 @@ export async function saveThemeMode(mode: ThemeMode): Promise<void> {
      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
     mode,
   );
+}
+
+// ── Fine-tuning persistence ───────────────────────────────────────────────────
+export async function saveFineTuningState(state: FineTuningState): Promise<void> {
+  await getDb().runAsync(
+    `INSERT INTO model_finetune (key, value, updated_at)
+     VALUES ('state', ?, datetime('now','localtime'))
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    JSON.stringify(state),
+  );
+}
+
+export async function loadFineTuningState(): Promise<FineTuningState | null> {
+  const row = await getDb().getFirstAsync<{ value: string }>(
+    `SELECT value FROM model_finetune WHERE key = 'state'`,
+  );
+  if (!row) return null;
+  try {
+    return JSON.parse(row.value) as FineTuningState;
+  } catch {
+    return null;
+  }
+}
+
+export async function clearFineTuningState(): Promise<void> {
+  await getDb().runAsync(`DELETE FROM model_finetune WHERE key = 'state'`);
 }
 
 export async function computeWeeklyStats(): Promise<WeeklyStats> {

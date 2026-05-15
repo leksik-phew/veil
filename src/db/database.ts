@@ -43,6 +43,12 @@ export async function initDatabase(): Promise<void> {
 
     CREATE INDEX IF NOT EXISTS idx_checkins_created ON checkins(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_voice_created    ON voice_entries(created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS model_finetune (
+      key        TEXT PRIMARY KEY,
+      value      TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+    );
   `);
 
   const columns = await _db.getAllAsync<{ name: string }>(`PRAGMA table_info(voice_entries)`);

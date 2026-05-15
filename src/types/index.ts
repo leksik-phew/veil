@@ -61,3 +61,16 @@ export interface WeeklyStats {
   topTrigger: TriggerId | null;
   averageIntensity: number;
 }
+
+// Fine-tuning state persisted to SQLite
+export interface FineTuningState {
+  // Current prototype centers per emotion (10 dims each)
+  centers: Record<EmotionId, number[]>;
+  // How many confirmed examples we've seen per emotion
+  counts:  Record<EmotionId, number>;
+  // Total confirmations across all emotions
+  totalConfirmations: number;
+  // Model version these deltas are based on
+  baseModelVersion: string;
+  lastUpdated: string | null;
+}

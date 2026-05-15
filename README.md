@@ -1,7 +1,7 @@
 # Veil — Emotion Tracking App
 
 > **Lift the veil. Understand yourself.**
-> A fully offline, privacy-first mobile application for iOS and Android that tracks emotions through daily check-ins, voice journaling, and breathing exercises — and surfaces personal patterns using two bundled on-device ML models.
+> A fully offline, privacy-first mobile application for iOS and Android that tracks emotions through daily check-ins, voice journaling, and breathing exercises — and surfaces personal patterns using two bundled on-device ML models with on-device personalisation.
 
 ---
 
@@ -15,6 +15,7 @@
 6. [Architecture](#architecture)
 7. [ML Models](#ml-models)
    - [Audio Emotion Classifier](#audio-emotion-classifier-veil-audio-prototype-net-v2)
+   - [On-device Fine-tuning](#on-device-fine-tuning)
    - [Pattern Model](#pattern-model-veil-pattern-bayes-net-v2)
 8. [Database Schema](#database-schema)
 9. [State Management](#state-management)
@@ -42,8 +43,8 @@ The core loop: check in → journal by voice → see patterns emerge → breathe
 ### Privacy-first by design
 All user data lives in a SQLite database on the device. Audio recordings stay in the local filesystem sandbox. The app opens zero network connections. Uninstalling removes everything.
 
-### Two bundled ML models, zero external dependencies
-Both the audio emotion classifier (`localEmotionModel.ts`) and the pattern detector (`patternModel.ts`) are hand-crafted TypeScript models with embedded weights. No TensorFlow, no ONNX, no model downloads. Classification happens synchronously on the JS thread in under 1ms.
+### Two bundled ML models with on-device personalisation
+Both the audio emotion classifier (`localEmotionModel.ts`) and the pattern detector (`patternModel.ts`) are hand-crafted TypeScript models with embedded weights. No TensorFlow, no ONNX, no model downloads. Classification happens synchronously on the JS thread in under 1ms. The audio model fine-tunes its prototype centres on every confirmed voice entry — personalising to each user’s voice without leaving the device.
 
 ### No state management library
 The global store (`useStore.ts`) is implemented from scratch using React hooks. It provides a selector API identical to Zustand without `import.meta`, which is incompatible with Hermes. No external dependency, no build-time issues.
@@ -91,10 +92,11 @@ Full recording and analysis pipeline:
 2. Records with `isMeteringEnabled: true`. Samples amplitude every 100ms.
 3. Live waveform: bars stored in `useState`, updated each polling tick — bars animate in real time.
 4. Mic ring pulses with `withRepeat(withSequence(up, down), -1)` — no recursive callbacks.
-5. On stop, passes samples through `extractFeatures()` → `classifyEmotionWithLocalModel()`.
+5. On stop, passes samples through `extractFeatures()` → `classifyEmotionWithLocalModel()`. The classifier uses the current fine-tuned prototype centres, so it improves with each confirmed recording.
 6. Result card slides in from below with `withSpring` on `opacity + translateY`.
 7. User can **correct** the detected emotion by tapping any of the 8 choice chips before saving. The original model output is preserved as `model_emotion`; the user-chosen (or confirmed) emotion is stored as `detected_emotion`.
-8. All acoustic features plus model version are persisted to `voice_entries`.
+8. On save, `addVoiceEntry` automatically calls `applyConfirmation()` to fine-tune the model and persists the updated prototype centres to SQLite.
+9. All acoustic features plus model version are persisted to `voice_entries`.
 
 ### ◌ Breathe
 Guided 4-7-8 breathing: 4s inhale → 7s hold → 8s exhale → 2s pause, 3 cycles.
@@ -106,8 +108,9 @@ Guided 4-7-8 breathing: 4s inhale → 7s hold → 8s exhale → 2s pause, 3 cycl
 
 ### ⚙ Settings
 - **Theme toggle** — dark / light, with a mini screen preview for each. Preference saved to `app_settings` table in SQLite and loaded on boot.
+- **Personalisation card** — shows total voice confirmations, a progress bar (50 confirmations = fully personalised), a per-emotion bar chart of how many times each emotion has been confirmed, and a "reset personalisation" button that wipes fine-tuned weights back to bundled defaults.
 - **Data management** — separate destructive actions for clearing check-ins, voice entries, or all data, each guarded by an `Alert.alert` confirmation.
-- **About** — version, storage policy, network status (zero requests), ML model inference location.
+- **About** — version, model names, storage policy, network status.
 
 ---
 
@@ -127,6 +130,7 @@ Guided 4-7-8 breathing: 4s inhale → 7s hold → 8s exhale → 2s pause, 3 cycl
 | Vector graphics | react-native-svg | 15.12.1 |
 | State management | Custom pub-sub hook | — |
 | Audio ML model | veil-audio-prototype-net-v2 | bundled TS |
+| Fine-tuning | EMA prototype update | on-device |
 | Pattern ML model | veil-pattern-bayes-net-v2 | bundled TS |
 
 ---
@@ -153,7 +157,7 @@ veil/
 │   │
 │   ├── engine/
 │   │   ├── emotionEngine.ts      # Public API: dbToAmplitude, extractFeatures, classifyEmotion
-│   │   ├── localEmotionModel.ts  # veil-audio-prototype-net-v2: prototypes, acoustic evidence
+│   │   ├── localEmotionModel.ts  # veil-audio-prototype-net-v2: prototypes, fine-tuning, EMA update
 │   │   └── patternModel.ts       # veil-pattern-bayes-net-v2: trigger→emotion scoring
 │   │
 │   ├── db/
@@ -163,7 +167,7 @@ veil/
 │   ├── store/useStore.ts         # Global pub-sub store: state, actions, useVeilStore hook
 │   │
 │   └── components/
-│       ├── PlutchikWheel.tsx     # SVG wheel: tap+drag gesture, theme-aware colours
+│       ├── PlutchikWheel.tsx     # SVG wheel: Gesture.Race(Tap,Pan), theme-aware colours
 │       ├── EntryCard.tsx         # Journal card: Reanimated spring press, theme-aware
 │       ├── FadeScreen.tsx        # Tab fade wrapper: useFocusEffect + withTiming opacity
 │       └── SettingsIcon.tsx      # SVG gear: 8 teeth, computed with cos/sin, hollow centre
@@ -230,10 +234,19 @@ onEnd:  withSpring(snap position)            // spring to nearest step
 ### Plutchik Wheel gesture pipeline
 
 ```
-Touch begin  →  save beginEid, isDrag = false
-Touch change →  if totalTranslation > 8px: isDrag = true, setHovered(emotionAtPoint)
-Touch end    →  isDrag ? emotionAtPoint(lift pos) : beginEid   →   onSelect
-Finalize     →  clear hover, clear refs                        (gesture cancelled)
+Gesture.Race(Tap, Pan):
+
+Tap  (maxDistance 12px, maxDuration 500ms)
+  onStart  →  emotionAtPoint(x,y)  →  onSelect(eid)
+
+Pan  (minDistance 10px)
+  onBegin  →  setHovered(emotionAtPoint)       // immediate feedback on touch
+  onUpdate →  setHovered(emotionAtPoint)       // live highlight as finger moves
+  onEnd    →  emotionAtPoint(lift pos)  →  onSelect(eid)
+  onFinalize →  setHovered(null)               // always clears hover
+
+Race result: quick touch → Tap wins; drag → Pan wins
+Separate state machines eliminate post-drag tap recognition failures
 ```
 
 ### Voice classification pipeline
@@ -262,6 +275,11 @@ User reviews result, optionally corrects emotion
       │
       ▼
 addVoiceEntry(path, corrected_emotion, model_emotion, confidence, features, duration, version)
+      │
+      ▼
+applyConfirmation(features, confirmedEmotion, modelEmotion, prevState)
+  → EMA update of prototype centres (in-memory + SQLite)
+  → updated FineTuningState stored in model_finetune table
       │
       ▼
 patternModel reads voice_entries alongside checkins
@@ -353,7 +371,59 @@ Intentional trade-off: demonstrates audio analysis without pretending to replace
 
 ---
 
-### Pattern Model (`veil-pattern-bayes-net-v2`)
+### On-device Fine-tuning
+
+**File:** `src/engine/localEmotionModel.ts`
+
+Every time the user saves a voice entry (confirming or correcting the model’s prediction), the prototype centres are updated using Exponential Moving Average with a decaying learning rate. No data leaves the device; the updated weights are persisted to SQLite and loaded back on next launch.
+
+#### Algorithm
+
+**Confirmation** (user agrees with the model’s prediction):
+
+```
+lr  = max(0.015,  0.12 / (1 + count×0.06))
+center[e][i]  = (1 − lr) × center[e][i]  +  lr × input[i]   for each dimension i
+count[e]  += 1
+```
+
+Learning rate schedule: 1st example ≈ 12%, 10th ≈ 7%, 50th ≈ 3.5%, 100th ≈ 2%. Asymptotes to the minimum `0.015` — the model never stops adapting, just becomes more conservative.
+
+**Correction** (user changes the detected emotion from `wrong` to `correct`):
+
+```
+// Pull correct prototype toward the user’s voice
+lr_c = max(0.015,  0.16 / (1 + count[correct]×0.06))
+center[correct][i] = (1 − lr_c) × center[correct][i] + lr_c × input[i]
+
+// Gently push the wrong prototype away
+center[wrong][i]   = clamp((1 + 0.04) × center[wrong][i] − 0.04 × input[i])
+```
+
+All 10 dimensions of the input vector are updated simultaneously and clamped to [0, 1].
+
+#### Persistence
+
+The `FineTuningState` is a single JSON blob in the `model_finetune` SQLite table:
+
+```typescript
+interface FineTuningState {
+  centers: Record<EmotionId, number[]>;   // 8 × 10 fine-tuned prototype centres
+  counts:  Record<EmotionId, number>;     // confirmation count per emotion
+  totalConfirmations: number;
+  baseModelVersion: string;               // must match MODEL_VERSION to apply
+  lastUpdated: string | null;             // ISO timestamp
+}
+```
+
+On app boot, `initModelFromState(state)` replaces the module-level `currentCenters` with persisted values. The model uses these throughout the session. `resetModelToDefaults()` restores bundled PROTOTYPES centres without touching the DB — `resetFineTuning()` in the store also clears the DB row.
+
+#### UI (Settings → Personalisation)
+
+- Empty state: prompt to save voice entries
+- Active state: progress bar (0–50 confirmations → 0–100%), per-emotion mini bar chart with count, reset button guarded by `Alert.alert`
+
+---
 
 **File:** `src/engine/patternModel.ts`
 
@@ -430,6 +500,16 @@ Top 4 patterns by score are returned and displayed as animated bars.
 | `duration_seconds` | INTEGER | recording length |
 | `created_at` | TEXT | `datetime('now','localtime')` |
 
+### `model_finetune`
+
+| Column | Type | Notes |
+|---|---|---|
+| `key` | TEXT PK | always `'state'` |
+| `value` | TEXT | JSON-encoded `FineTuningState` |
+| `updated_at` | TEXT | last write timestamp |
+
+Uses upsert — at most one row exists at all times.
+
 ### `app_settings`
 
 | Column | Type | Notes |
@@ -466,13 +546,14 @@ useVeilStore<T>(selector) hook  →  subscribes on mount, unsubscribes on unmoun
 
 | Action | What it does |
 |---|---|
-| `loadAll()` | `Promise.all` of 6 queries, then `setState` |
+| `loadAll()` | `Promise.all` of 7 queries (incl. `loadFineTuningState`), then `setState` + `initModelFromState` |
 | `addCheckIn()` | insert → loadAll |
-| `addVoiceEntry()` | insert (all 8 features + model_emotion + model_version) → loadAll |
+| `addVoiceEntry()` | insert → `applyConfirmation()` → `saveFineTuningState()` → loadAll |
 | `setThemeMode(mode)` | `setState` immediately + `saveThemeMode()` to SQLite |
 | `resetCheckIns()` | `DELETE FROM checkins` → loadAll |
 | `resetVoiceEntries()` | `DELETE FROM voice_entries` → loadAll |
 | `resetAllData()` | both DELETEs in a transaction → loadAll |
+| `resetFineTuning()` | `clearFineTuningState()` + `resetModelToDefaults()` → setState |
 
 ### Why not Zustand?
 
@@ -705,8 +786,6 @@ Recommended `eas.json`:
 - **Home screen widget** — one-tap emotion log without opening the app
 - **Data export** — JSON/CSV download via `expo-sharing`
 - **Sleep + energy inputs** — two extra sliders in check-in step 1; feeds real correlations into patterns
-- **On-device fine-tuning** — accumulate confirmed voice labels to personalise the prototype model weights (no data leaves the device)
-- **iCloud backup** — opt-in SQLite export to iCloud Drive (not sync)
 
 ---
 
