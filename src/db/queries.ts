@@ -124,7 +124,71 @@ export async function fetchLang(): Promise<Lang> {
   return (row?.value as Lang) ?? 'en';
 }
 
-// ── Fine-tuning persistence ───────────────────────────────────────────────────
+// ── Export helpers (no limit, include all rows) ─────────────────────────────
+export async function fetchAllCheckInsForExport(): Promise<CheckIn[]> {
+  const rows = await getDb().getAllAsync<{
+    id: number; emotion: string; intensity: number;
+    triggers: string; note: string; created_at: string;
+  }>(`SELECT * FROM checkins ORDER BY created_at ASC`);
+  return rows.map(r => ({
+    id: r.id, emotion: r.emotion as EmotionId, intensity: r.intensity,
+    triggers: JSON.parse(r.triggers) as TriggerId[],
+    note: r.note, createdAt: r.created_at,
+  }));
+}
+
+export async function fetchAllVoiceEntriesForExport(): Promise<VoiceEntry[]> {
+  const rows = await getDb().getAllAsync<{
+    id: number; audio_path: string; detected_emotion: string; model_emotion: string;
+    confidence: number; energy: number; variance: number;
+    tempo: number; peak_ratio: number; dynamic_range: number;
+    attack: number; silence_ratio: number; stability: number;
+    model_version: string; duration_seconds: number; created_at: string;
+  }>(`SELECT * FROM voice_entries ORDER BY created_at ASC`);
+  return rows.map(r => ({
+    id: r.id, audioPath: '',           // device-specific, excluded from export
+    detectedEmotion: r.detected_emotion as EmotionId,
+    modelEmotion: (r.model_emotion || r.detected_emotion) as EmotionId,
+    confidence: r.confidence, energy: r.energy,
+    variance: r.variance, tempo: r.tempo,
+    peakRatio: r.peak_ratio ?? 0, dynamicRange: r.dynamic_range ?? 0,
+    attack: r.attack ?? 0, silenceRatio: r.silence_ratio ?? 0,
+    stability: r.stability ?? 0,
+    modelVersion: r.model_version ?? 'legacy',
+    durationSeconds: r.duration_seconds, createdAt: r.created_at,
+  }));
+}
+
+// ── Import helpers ────────────────────────────────────────────────────────────
+export async function insertCheckInRaw(c: CheckIn): Promise<void> {
+  await getDb().runAsync(
+    `INSERT OR IGNORE INTO checkins (emotion, intensity, triggers, note, created_at)
+     VALUES (?,?,?,?,?)`,
+    c.emotion, c.intensity, JSON.stringify(c.triggers), c.note, c.createdAt,
+  );
+}
+
+export async function insertVoiceEntryRaw(e: VoiceEntry): Promise<void> {
+  await getDb().runAsync(
+    `INSERT OR IGNORE INTO voice_entries
+     (detected_emotion,model_emotion,confidence,energy,variance,tempo,peak_ratio,
+      dynamic_range,attack,silence_ratio,stability,model_version,duration_seconds,created_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    e.detectedEmotion, e.modelEmotion, e.confidence,
+    e.energy, e.variance, e.tempo, e.peakRatio,
+    e.dynamicRange, e.attack, e.silenceRatio, e.stability,
+    e.modelVersion, e.durationSeconds, e.createdAt,
+  );
+}
+
+export async function fetchExistingCreatedAts(): Promise<{ checkins: Set<string>; voice: Set<string> }> {
+  const ci = await getDb().getAllAsync<{ created_at: string }>(`SELECT created_at FROM checkins`);
+  const ve = await getDb().getAllAsync<{ created_at: string }>(`SELECT created_at FROM voice_entries`);
+  return {
+    checkins: new Set(ci.map(r => r.created_at)),
+    voice:    new Set(ve.map(r => r.created_at)),
+  };
+}
 export async function saveFineTuningState(state: FineTuningState): Promise<void> {
   await getDb().runAsync(
     `INSERT INTO model_finetune (key, value, updated_at)

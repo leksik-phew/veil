@@ -6,6 +6,13 @@ import {
   saveThemeMode, saveLang, fetchLang,
   saveFineTuningState, loadFineTuningState, clearFineTuningState,
 } from '../db/queries';
+import {
+  exportData as _exportData,
+  importData as _importData,
+  pickBackupFile,
+  type VeilBackupFile,
+  type ImportMode,
+} from '../db/exportImport';
 import { getThemeColors, type ThemeColors } from '../constants/emotions';
 import {
   initModelFromState, applyConfirmation, defaultFineTuningState, resetModelToDefaults,
@@ -39,6 +46,10 @@ interface VeilStore {
   resetVoiceEntries: () => Promise<void>;
   resetAllData:      () => Promise<void>;
   resetFineTuning:   () => Promise<void>;
+  // Export / Import
+  exportData:        () => Promise<void>;
+  pickBackupFile:    () => Promise<VeilBackupFile | null>;
+  importData:        (file: VeilBackupFile, mode: ImportMode, includeSettings: boolean, includeFineTuning: boolean) => Promise<void>;
 }
 
 type Listener = () => void;
@@ -56,6 +67,7 @@ let state: VeilStore = {
   addCheckIn: async () => {}, addVoiceEntry: async () => {},
   resetCheckIns: async () => {}, resetVoiceEntries: async () => {},
   resetAllData: async () => {}, resetFineTuning: async () => {},
+  exportData: async () => {}, pickBackupFile: async () => null, importData: async () => {},
 };
 
 function setState(patch: Partial<VeilStore>) {
@@ -112,14 +124,48 @@ Object.assign(state, {
     await state.loadAll();
   },
 
-  resetCheckIns: async () => { await clearCheckIns(); await state.loadAll(); },
+  resetCheckIns:     async () => { await clearCheckIns();   await state.loadAll(); },
   resetVoiceEntries: async () => { await clearVoiceEntries(); await state.loadAll(); },
-  resetAllData: async () => { await clearAllData(); await state.loadAll(); },
+  resetAllData:      async () => { await clearAllData(); await clearFineTuningState(); resetModelToDefaults(); setState({ fineTuningState: defaultFineTuningState() }); await state.loadAll(); },
 
   resetFineTuning: async () => {
     await clearFineTuningState();
     resetModelToDefaults();
     setState({ fineTuningState: defaultFineTuningState() });
+  },
+
+  // ── Export / Import ────────────────────────────────────────────────────────
+  exportData: async () => {
+    await _exportData();
+  },
+
+  pickBackupFile: async () => {
+    return pickBackupFile();
+  },
+
+  importData: async (
+    file: VeilBackupFile,
+    mode: ImportMode,
+    includeSettings:   boolean,
+    includeFineTuning: boolean,
+  ) => {
+    await _importData(file, mode, includeSettings, includeFineTuning);
+
+    // Immediately apply settings to in-memory state if included
+    if (includeSettings) {
+      setState({
+        themeMode: file.settings.themeMode,
+        theme:     getThemeColors(file.settings.themeMode),
+        lang:      file.settings.lang,
+      });
+    }
+    if (includeFineTuning && file.fineTuningState) {
+      initModelFromState(file.fineTuningState);
+      setState({ fineTuningState: file.fineTuningState });
+    }
+
+    // Reload all entries from DB
+    await state.loadAll();
   },
 });
 
@@ -136,3 +182,6 @@ export function useVeilStore<T>(selector: (s: VeilStore) => T): T {
 
   return selectorRef.current(state);
 }
+
+// Re-export types that settings.tsx needs
+export type { VeilBackupFile, ImportMode };

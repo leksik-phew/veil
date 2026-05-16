@@ -134,6 +134,7 @@ Guided 4-7-8 breathing: 4s inhale → 7s hold → 8s exhale → 2s pause, 3 cycl
 | Fine-tuning | EMA prototype update | on-device |
 | Pattern ML model | veil-pattern-bayes-net-v2 | bundled TS |
 | Localisation | Custom i18n (EN / RU) | bundled |
+| Export / Import | expo-sharing + expo-document-picker | ~12.0.6 / ~14.0.8 |
 
 ---
 
@@ -168,7 +169,8 @@ veil/
 │   │
 │   ├── db/
 │   │   ├── database.ts           # openDatabaseAsync, schema, column migration guards
-│   │   └── queries.ts            # All SQL: CRUD, analytics, theme persistence
+│   │   ├── queries.ts            # All SQL: CRUD, analytics, theme/lang persistence
+│   │   └── exportImport.ts       # Export to JSON (expo-sharing) + import (expo-document-picker)
 │   │
 │   ├── store/useStore.ts         # Global pub-sub store: state, actions, useVeilStore hook
 │   │
@@ -558,7 +560,7 @@ useVeilStore<T>(selector) hook  →  subscribes on mount, unsubscribes on unmoun
 | `setThemeMode(mode)` | `setState` immediately + `saveThemeMode()` to SQLite |
 | `resetCheckIns()` | `DELETE FROM checkins` → loadAll |
 | `resetVoiceEntries()` | `DELETE FROM voice_entries` → loadAll |
-| `resetAllData()` | both DELETEs in a transaction → loadAll |
+| `resetAllData()` | both DELETEs + `clearFineTuningState()` + `resetModelToDefaults()` → loadAll |
 | `resetFineTuning()` | `clearFineTuningState()` + `resetModelToDefaults()` → setState |
 
 ### Why not Zustand?
@@ -800,9 +802,66 @@ A zero-dependency, compile-time-safe i18n system.
 
 ---
 
-## Roadmap — daily check-in reminder at a user-configured time via `expo-notifications`
+## Export & Import
+
+**File:** `src/db/exportImport.ts`
+
+### Backup format
+
+All data is exported as a single JSON file (`veil-backup-YYYY-MM-DD.json`) shared via the native share sheet:
+
+```typescript
+interface VeilBackupFile {
+  veilBackup:    true;          // marker
+  schemaVersion: number;         // currently 2
+  exportedAt:    string;         // ISO timestamp
+  appVersion:    string;         // "1.0.0"
+  stats: {
+    checkInsCount:     number;
+    voiceEntriesCount: number;
+  };
+  settings: {
+    themeMode: ThemeMode;        // 'dark' | 'light'
+    lang:      Lang;             // 'en' | 'ru'
+  };
+  checkIns:        CheckIn[];   // complete, with triggers array
+  voiceEntries:    VoiceEntry[]; // all acoustic features; audioPath = ""
+  fineTuningState: FineTuningState | null;
+}
+```
+
+`audioPath` is always empty in exports — audio files are device-specific filesystem paths and cannot be transferred meaningfully.
+
+### Import modes
+
+**Replace** — clears all existing check-ins and voice entries first, then inserts everything from the backup file. Fine-tuning and settings are replaced if the user chooses so.
+
+**Merge** — inserts only entries whose `created_at` timestamp does not already exist in the database (`INSERT OR IGNORE`). Does not delete any existing data. Settings and fine-tuning are applied only if the user opts in.
+
+### Import flow (Settings → Export & Import → Import)
+
+1. **DocumentPicker** — user selects a `.json` file
+2. **Validation** — checks `veilBackup: true`, `schemaVersion ≤ 2`, array shapes
+3. **Alert 1** — shows backup date and counts, asks Replace / Merge / Cancel
+4. **Alert 2** — asks whether to apply settings (theme + language) from backup
+5. **Alert 3** — asks whether to apply ML personalisation weights from backup
+6. **Apply** — runs in the JS thread; updates DB and in-memory store
+7. **Success alert** — shows how many entries were imported
+
+### Validation errors caught
+
+- Not a JSON object
+- `veilBackup` marker missing
+- `schemaVersion` newer than app supports
+- `checkIns` or `voiceEntries` not arrays
+- `settings` object missing
+
+---
+
+## Roadmap
+
+- **Push notifications** — daily check-in reminder at a user-configured time via `expo-notifications`
 - **Home screen widget** — one-tap emotion log without opening the app
-- **Data export** — JSON/CSV download via `expo-sharing`
 - **Sleep + energy inputs** — two extra sliders in check-in step 1; feeds real correlations into patterns
 
 ---
