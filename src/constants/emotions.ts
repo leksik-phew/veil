@@ -90,3 +90,10 @@ export const getThemeColors = (mode: ThemeMode): ThemeColors =>
 
 // Static fallback — use only in components that can't call useVeilStore
 export const COLORS = DARK_COLORS;
+
+// Localised emotion label — use inside a React component
+import { TRANSLATIONS } from '../i18n/translations';
+import type { Lang } from '../i18n/translations';
+export function getEmotionLabel(id: EmotionId, lang: Lang): string {
+  return TRANSLATIONS[lang].emotions[id];
+}

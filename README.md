@@ -107,9 +107,10 @@ Guided 4-7-8 breathing: 4s inhale → 7s hold → 8s exhale → 2s pause, 3 cycl
 - Countdown timer via `setInterval` with a ref; cleaned up on unmount.
 
 ### ⚙ Settings
-- **Theme toggle** — dark / light, with a mini screen preview for each. Preference saved to `app_settings` table in SQLite and loaded on boot.
-- **Personalisation card** — shows total voice confirmations, a progress bar (50 confirmations = fully personalised), a per-emotion bar chart of how many times each emotion has been confirmed, and a "reset personalisation" button that wipes fine-tuned weights back to bundled defaults.
-- **Data management** — separate destructive actions for clearing check-ins, voice entries, or all data, each guarded by an `Alert.alert` confirmation.
+- **Theme toggle** — dark / light, with a mini screen preview for each.
+- **Language selector** — English / Russian cards with flag emoji. Switching language is instant — the entire UI re-renders from the store. Preference persisted to `app_settings` in SQLite and restored on boot. Translated: all tab labels, all screen titles and subtitles, emotion names (Plutchik wheel + cards + voice result), trigger names (chips + journal cards + pattern labels), breathing phases, all confirmation dialogs and alert messages.
+- **Personalisation card** — shows total voice confirmations, a progress bar (50 confirmations = fully personalised), a per-emotion bar chart, and a "reset personalisation" button.
+- **Data management** — separate destructive actions for clearing check-ins, voice entries, or all data. All labels and confirmation dialogs are translated.
 - **About** — version, model names, storage policy, network status.
 
 ---
@@ -132,6 +133,7 @@ Guided 4-7-8 breathing: 4s inhale → 7s hold → 8s exhale → 2s pause, 3 cycl
 | Audio ML model | veil-audio-prototype-net-v2 | bundled TS |
 | Fine-tuning | EMA prototype update | on-device |
 | Pattern ML model | veil-pattern-bayes-net-v2 | bundled TS |
+| Localisation | Custom i18n (EN / RU) | bundled |
 
 ---
 
@@ -153,7 +155,11 @@ veil/
 ├── src/
 │   ├── types/index.ts            # All TS types: EmotionId, CheckIn, VoiceEntry, ThemeMode…
 │   │
-│   ├── constants/emotions.ts     # EMOTIONS, TRIGGERS, DARK_COLORS, LIGHT_COLORS, getThemeColors
+│   ├── constants/emotions.ts     # EMOTIONS, TRIGGERS, palettes, getThemeColors, getEmotionLabel
+│   │
+│   ├── i18n/
+│   │   ├── translations.ts       # All UI strings for EN and RU; Lang type; pluralRu helper
+│   │   └── useTranslation.ts     # useTranslation() hook; useTranslationSection() hook
 │   │
 │   ├── engine/
 │   │   ├── emotionEngine.ts      # Public API: dbToAmplitude, extractFeatures, classifyEmotion
@@ -780,9 +786,21 @@ Recommended `eas.json`:
 
 ---
 
-## Roadmap
+### Localisation
 
-- **Push notifications** — daily check-in reminder at a user-configured time via `expo-notifications`
+**Files:** `src/i18n/translations.ts`, `src/i18n/useTranslation.ts`
+
+A zero-dependency, compile-time-safe i18n system.
+
+**Covered:** all UI strings across all 6 screens, tab labels, emotion names (on Plutchik Wheel, voice result, journal cards), trigger names (in chips, journal cards, pattern labels), breathing phase names and practice descriptions, alert dialogs, settings sections. Date/time formatting uses the native `toLocaleDateString(locale)` API.
+
+**Russian-specific:** `pluralRu(n, one, few, many)` helper handles the three Russian plural forms: 1 подтверждение / 2 подтверждения / 5 подтверждений. Day-of-week headers in the heatmap calendar use Russian two-letter abbreviations (Пн/Вт/Ср…).
+
+**Adding a language:** add a new key to `TRANSLATIONS` in `translations.ts`, add the `Lang` union type, add a `LangCard` in settings. No other files need changes.
+
+---
+
+## Roadmap — daily check-in reminder at a user-configured time via `expo-notifications`
 - **Home screen widget** — one-tap emotion log without opening the app
 - **Data export** — JSON/CSV download via `expo-sharing`
 - **Sleep + energy inputs** — two extra sliders in check-in step 1; feeds real correlations into patterns

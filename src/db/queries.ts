@@ -1,5 +1,5 @@
 import { getDb } from './database';
-import type { CheckIn, VoiceEntry, EmotionId, TriggerId, WeeklyStats, AudioFeatures, ThemeMode, FineTuningState } from '../types';
+import type { CheckIn, VoiceEntry, EmotionId, TriggerId, WeeklyStats, AudioFeatures, ThemeMode, Lang, FineTuningState } from '../types';
 
 export async function insertCheckIn(
   emotion: EmotionId, intensity: number, triggers: TriggerId[], note: string,
@@ -106,6 +106,22 @@ export async function saveThemeMode(mode: ThemeMode): Promise<void> {
      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
     mode,
   );
+}
+
+export async function saveLang(lang: Lang): Promise<void> {
+  await getDb().runAsync(
+    `INSERT INTO app_settings (key, value, updated_at)
+     VALUES ('lang', ?, datetime('now','localtime'))
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    lang,
+  );
+}
+
+export async function fetchLang(): Promise<Lang> {
+  const row = await getDb().getFirstAsync<{ value: string }>(
+    `SELECT value FROM app_settings WHERE key = 'lang'`,
+  );
+  return (row?.value as Lang) ?? 'en';
 }
 
 // ── Fine-tuning persistence ───────────────────────────────────────────────────

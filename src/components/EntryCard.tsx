@@ -1,18 +1,31 @@
 import React from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
-import { getEmotion } from '../constants/emotions';
+import { getEmotion, getEmotionLabel } from '../constants/emotions';
 import { useVeilStore } from '../store/useStore';
+import { TRANSLATIONS } from '../i18n/translations';
 import type { CheckIn } from '../types';
 
 export default function EntryCard({ entry }: { entry: CheckIn }) {
-  const t       = useVeilStore(s => s.theme);
-  const emotion = getEmotion(entry.emotion);
-  const d       = new Date(entry.createdAt);
-  const dateStr = d.toLocaleDateString('en', { month: 'short', day: 'numeric' });
-  const timeStr = d.toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' });
+  const t    = useVeilStore(s => s.theme);
+  const lang = useVeilStore(s => s.lang);
 
-  const scale    = useSharedValue(1);
+  const emotion   = getEmotion(entry.emotion);
+  const emoLabel  = getEmotionLabel(entry.emotion, lang);
+  const trTriggers = TRANSLATIONS[lang].triggers;
+
+  // Locale-aware date formatting
+  const locale = lang === 'ru' ? 'ru-RU' : 'en-US';
+  const d       = new Date(entry.createdAt);
+  const dateStr = d.toLocaleDateString(locale, { month: 'short', day: 'numeric' });
+  const timeStr = d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
+
+  // Translate known trigger IDs; leave custom #hashtag triggers as-is
+  const triggerText = entry.triggers
+    .map(id => (trTriggers as Record<string, string>)[id] ?? id)
+    .join(', ');
+
+  const scale     = useSharedValue(1);
   const animStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
 
   return (
@@ -20,19 +33,17 @@ export default function EntryCard({ entry }: { entry: CheckIn }) {
       onPressIn={() => { scale.value = withSpring(0.975, { damping: 26, stiffness: 400, mass: 0.5 }); }}
       onPressOut={() => { scale.value = withSpring(1,     { damping: 22, stiffness: 300, mass: 0.5 }); }}
     >
-      <Animated.View style={[s.card, animStyle, {
-        backgroundColor: t.card, borderColor: t.border,
-      }]}>
+      <Animated.View style={[s.card, animStyle, { backgroundColor: t.card, borderColor: t.border }]}>
         <View style={s.row}>
           <View style={[s.dot, { backgroundColor: emotion.color }]} />
           <View style={s.body}>
             <View style={s.head}>
-              <Text style={[s.emo, { color: emotion.color }]}>{emotion.label}</Text>
+              <Text style={[s.emo, { color: emotion.color }]}>{emoLabel}</Text>
               <Text style={[s.time, { color: t.textDim }]}>{dateStr} · {timeStr}</Text>
             </View>
             {entry.triggers.length > 0 && (
               <Text style={[s.trigger, { color: t.textMuted, backgroundColor: t.chip }]}>
-                {entry.triggers.join(', ')}
+                {triggerText}
               </Text>
             )}
             {entry.note.length > 0 && (

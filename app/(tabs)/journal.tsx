@@ -4,14 +4,16 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import EntryCard from '../../src/components/EntryCard';
 import { FadeScreen } from '../../src/components/FadeScreen';
 import { useVeilStore } from '../../src/store/useStore';
+import { TRANSLATIONS } from '../../src/i18n/translations';
 
 export default function JournalScreen() {
-  const { checkIns, t } = useVeilStore(s => ({ checkIns: s.checkIns, t: s.theme }));
+  const { checkIns, t, lang } = useVeilStore(s => ({ checkIns: s.checkIns, t: s.theme, lang: s.lang }));
+  const tr = TRANSLATIONS[lang].journal;
   return (
     <FadeScreen>
       <SafeAreaView style={[s.safe, { backgroundColor: t.bg }]} edges={['top']}>
         <View style={s.header}>
-          <Text style={[s.title, { color: t.text }]}>journal</Text>
+          <Text style={[s.title, { color: t.text }]}>{tr.title}</Text>
           <View style={[s.badge, { backgroundColor: t.chip }]}>
             <Text style={[s.badgeText, { color: t.textMuted }]}>{checkIns.length}</Text>
           </View>
@@ -24,9 +26,9 @@ export default function JournalScreen() {
           renderItem={({ item }) => <EntryCard entry={item} />}
           ListEmptyComponent={
             <View style={s.empty}>
-              <Text style={[s.emptyIcon, { color: t.textDim }]}>◎</Text>
-              <Text style={[s.emptyText, { color: t.textMuted }]}>no entries yet</Text>
-              <Text style={[s.emptySub, { color: t.textDim }]}>do your first check-in</Text>
+              <Text style={[s.emptyIcon, { color: t.textDim }]}>{tr.emptyIcon}</Text>
+              <Text style={[s.emptyText, { color: t.textMuted }]}>{tr.emptyTitle}</Text>
+              <Text style={[s.emptySub, { color: t.textDim }]}>{tr.emptySub}</Text>
             </View>
           }
           contentContainerStyle={s.listContent}

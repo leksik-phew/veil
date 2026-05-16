@@ -1,5 +1,7 @@
-import { getEmotion } from '../constants/emotions';
+import { getEmotion, getEmotionLabel } from '../constants/emotions';
+import { TRANSLATIONS } from '../i18n/translations';
 import type { CheckIn, EmotionId, VoiceEntry } from '../types';
+import type { Lang } from '../i18n/translations';
 
 export type NeuralPattern = {
   label: string;
@@ -29,7 +31,11 @@ const MODEL_VERSION = 'veil-pattern-bayes-net-v2';
 const WEIGHTS = [0.72, 1.28, 0.58, 0.5, 0.8, 1.1];
 const BIAS = -1.42;
 
-export function buildNeuralPatterns(checkIns: CheckIn[], voiceEntries: VoiceEntry[] = [], limit = 4): NeuralPattern[] {
+export function buildNeuralPatterns(checkIns: CheckIn[], voiceEntries: VoiceEntry[] = [], limit = 4, lang: Lang = 'en'): NeuralPattern[] {
+  const trTriggers = TRANSLATIONS[lang].triggers;
+  // Localised name for the voice journal synthetic trigger
+  const voiceTriggerKey = 'voice journal';
+  const voiceTriggerLabel = lang === 'ru' ? 'голосовой журнал' : 'voice journal';
   const allEntries = buildPatternEntries(checkIns, voiceEntries);
   if (allEntries.length < 3) return [];
 
@@ -51,9 +57,17 @@ export function buildNeuralPatterns(checkIns: CheckIn[], voiceEntries: VoiceEntr
     if (!topEmotion) continue;
 
     const features = extractPatternFeatures(entries, allEntries, topEmotion, globalEmotionCounts);
-    const emotion = getEmotion(topEmotion);
+    const emotion  = getEmotion(topEmotion);
+
+    // Translate trigger name: known trigger ID → locale label, voice key → locale label, else raw
+    const triggerDisplay = trigger === voiceTriggerKey
+      ? voiceTriggerLabel
+      : (trTriggers as Record<string, string>)[trigger] ?? trigger;
+
+    const emoDisplay = getEmotionLabel(topEmotion, lang);
+
     candidates.push({
-      label: `${trigger} -> ${emotion.label}`,
+      label: `${triggerDisplay} → ${emoDisplay}`,
       value: scorePattern(features),
       color: emotion.color,
       trigger,
@@ -110,15 +124,15 @@ function scorePattern(features: PatternFeatures) {
 function buildPatternEntries(checkIns: CheckIn[], voiceEntries: VoiceEntry[]): PatternEntry[] {
   return [
     ...checkIns.map(entry => ({
-      emotion: entry.emotion,
+      emotion:   entry.emotion,
       intensity: entry.intensity,
-      triggers: [...entry.triggers],
+      triggers:  [...entry.triggers],
       createdAt: entry.createdAt,
     })),
     ...voiceEntries.map(entry => ({
-      emotion: entry.detectedEmotion,
+      emotion:   entry.detectedEmotion,
       intensity: voicePatternIntensity(entry),
-      triggers: ['voice journal'],
+      triggers:  ['voice journal'],  // internal key — translated at display time
       createdAt: entry.createdAt,
     })),
   ];

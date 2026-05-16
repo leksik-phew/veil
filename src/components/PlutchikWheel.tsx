@@ -2,8 +2,9 @@ import React, { useState } from 'react';
 import { View } from 'react-native';
 import Svg, { Path, Circle, Text as SvgText, Defs, RadialGradient, Stop } from 'react-native-svg';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
-import { EMOTIONS, getEmotion } from '../constants/emotions';
+import { EMOTIONS, getEmotion, getEmotionLabel } from '../constants/emotions';
 import { useVeilStore } from '../store/useStore';
+import { TRANSLATIONS } from '../i18n/translations';
 import type { EmotionId } from '../types';
 
 interface Props {
@@ -15,7 +16,6 @@ interface Props {
 const CX = 110, CY = 110, R_IN = 38, R_OUT = 90;
 const toRad = (d: number) => (d - 90) * Math.PI / 180;
 
-// ── Geometry ──────────────────────────────────────────────────────────────────
 function sectorPath(sd: number, ed: number, ri: number, ro: number): string {
   const s = toRad(sd), e = toRad(ed);
   const x1 = CX + ro * Math.cos(s), y1 = CY + ro * Math.sin(s);
@@ -37,55 +37,39 @@ function emotionAtPoint(x: number, y: number, svgSize: number): EmotionId | null
   return EMOTIONS[Math.floor(((angle + 22.5) % 360) / 45) % 8].id;
 }
 
-// ── Component ─────────────────────────────────────────────────────────────────
 export default function PlutchikWheel({ selected, onSelect, size = 240 }: Props) {
-  const t = useVeilStore(s => s.theme);
+  const t    = useVeilStore(s => s.theme);
+  const lang = useVeilStore(s => s.lang);
   const [hovered, setHovered] = useState<EmotionId | null>(null);
 
   const displayed    = hovered ?? selected;
   const displayedEmo = displayed ? getEmotion(displayed) : null;
 
-  // ── Tap gesture — handles simple taps reliably ────────────────────────────
-  // Uses RNGH Tap which has its own clean state machine separate from Pan.
+  // Localised centre hint
+  const hintText = lang === 'ru' ? 'слайд или тап' : 'slide or tap';
+
   const tapGesture = Gesture.Tap()
     .runOnJS(true)
-    .maxDuration(500)      // must lift within 500ms to count as a tap
-    .maxDistance(12)       // must not move more than 12px
+    .maxDuration(500)
+    .maxDistance(12)
     .onStart((e) => {
       const eid = emotionAtPoint(e.x, e.y, size);
       if (!eid) return;
       onSelect(eid === selected ? null : eid);
     });
 
-  // ── Pan gesture — handles drag/slide selection ────────────────────────────
-  // minDistance(10) means it only activates after the finger has moved 10px,
-  // which prevents it from stealing quick taps from the Tap gesture.
   const panGesture = Gesture.Pan()
     .runOnJS(true)
     .minDistance(10)
-    .onBegin((e) => {
-      // onBegin fires on first touch, before recognition — gives immediate hover
-      const eid = emotionAtPoint(e.x, e.y, size);
-      setHovered(eid);
-    })
-    .onUpdate((e) => {
-      // Live highlight as finger moves around the ring
-      const eid = emotionAtPoint(e.x, e.y, size);
-      setHovered(eid);
-    })
+    .onBegin((e) => { setHovered(emotionAtPoint(e.x, e.y, size)); })
+    .onUpdate((e) => { setHovered(emotionAtPoint(e.x, e.y, size)); })
     .onEnd((e) => {
       const eid = emotionAtPoint(e.x, e.y, size);
       if (eid) onSelect(eid === selected ? null : eid);
       setHovered(null);
     })
-    .onFinalize(() => {
-      // Always clear hover — fires whether gesture succeeded or was cancelled
-      setHovered(null);
-    });
+    .onFinalize(() => { setHovered(null); });
 
-  // Race: for a quick tap, Tap wins (Pan hasn't exceeded minDistance).
-  // For a drag, Pan wins (Tap fails if finger moves > maxDistance).
-  // Both gestures have completely separate state machines — no interference.
   const gesture = Gesture.Race(tapGesture, panGesture);
 
   return (
@@ -104,66 +88,52 @@ export default function PlutchikWheel({ selected, onSelect, size = 240 }: Props)
               const isSelected = selected === e.id;
               const isHovered  = hovered  === e.id;
               const mid = toRad(e.angle);
-
               return (
                 <React.Fragment key={e.id}>
-                  {/* Outer glow halo on hover */}
                   {isHovered && (
                     <Path
                       d={sectorPath(e.angle - 22.5, e.angle + 22.5, R_IN - 3, R_OUT + 8)}
                       fill={e.color + '28'}
                     />
                   )}
-
-                  {/* Main sector */}
                   <Path
                     d={sectorPath(e.angle - 22.5, e.angle + 22.5, R_IN, R_OUT)}
-                    fill={
-                      isSelected ? e.color
-                      : isHovered ? e.color + 'a0'
-                      : e.color + '55'
-                    }
-                    stroke={
-                      isSelected ? e.color
-                      : isHovered ? e.color + 'cc'
-                      : t.border
-                    }
+                    fill={isSelected ? e.color : isHovered ? e.color + 'a0' : e.color + '55'}
+                    stroke={isSelected ? e.color : isHovered ? e.color + 'cc' : t.border}
                     strokeWidth={isSelected || isHovered ? 2 : 1}
                   />
-
-                  {/* Label */}
                   <SvgText
                     x={CX + 66 * Math.cos(mid)} y={CY + 66 * Math.sin(mid)}
                     textAnchor="middle" alignmentBaseline="middle"
-                    fontSize={isHovered ? 9.5 : 8.5}
+                    fontSize={isHovered ? 9 : 8}
                     fill={isSelected || isHovered ? t.text : t.textDim}
                     fontWeight={isSelected || isHovered ? '600' : '400'}
                   >
-                    {e.label}
+                    {getEmotionLabel(e.id, lang)}
                   </SvgText>
                 </React.Fragment>
               );
             })}
 
-            {/* Centre */}
             <Circle cx={CX} cy={CY} r={R_IN - 2} fill={t.wheelCenter} />
             {displayedEmo && <Circle cx={CX} cy={CY} r={R_IN - 2} fill="url(#cg)" />}
 
             {displayedEmo ? (
               <>
                 <SvgText x={CX} y={CY - 8} textAnchor="middle"
-                  fontSize={20} fill={displayedEmo.color}
-                  opacity={hovered ? 0.7 : 1}>●</SvgText>
+                  fontSize={20} fill={displayedEmo.color} opacity={hovered ? 0.7 : 1}>
+                  ●
+                </SvgText>
                 <SvgText x={CX} y={CY + 11} textAnchor="middle"
                   alignmentBaseline="middle" fontSize={9} fontWeight="600"
                   fill={hovered ? t.textMuted : t.text}>
-                  {displayedEmo.label}
+                  {getEmotionLabel(displayedEmo.id, lang)}
                 </SvgText>
               </>
             ) : (
               <SvgText x={CX} y={CY} textAnchor="middle"
                 alignmentBaseline="middle" fontSize={9} fill={t.textDim}>
-                slide or tap
+                {hintText}
               </SvgText>
             )}
           </Svg>

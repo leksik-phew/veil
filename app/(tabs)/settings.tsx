@@ -5,7 +5,8 @@ import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-na
 import { FadeScreen } from '../../src/components/FadeScreen';
 import { useVeilStore } from '../../src/store/useStore';
 import { EMOTIONS } from '../../src/constants/emotions';
-import type { ThemeMode } from '../../src/types';
+import { TRANSLATIONS } from '../../src/i18n/translations';
+import type { ThemeMode, Lang } from '../../src/types';
 
 // ── Animated row ──────────────────────────────────────────────────────────────
 function ActionRow({ label, sub, color, onPress }: {
@@ -41,8 +42,8 @@ const row = StyleSheet.create({
 function ThemeCard({ mode, label, active, onPress, accent }: {
   mode: ThemeMode; label: string; active: boolean; onPress: () => void; accent: string;
 }) {
-  const scale = useSharedValue(1);
-  const anim  = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+  const scale  = useSharedValue(1);
+  const anim   = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
   const isDark = mode === 'dark';
   const bg     = isDark ? '#0d0b14' : '#f7f4ef';
   const card   = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(18,16,24,0.06)';
@@ -76,52 +77,75 @@ const tc = StyleSheet.create({
   dot:           { width: 6, height: 6, borderRadius: 3, alignSelf: 'center', marginBottom: 8 },
 });
 
-// ── Personalization card ──────────────────────────────────────────────────────
-function PersonalizationCard() {
-  const { t, ft, resetFineTuning } = useVeilStore(s => ({
-    t: s.theme, ft: s.fineTuningState, resetFineTuning: s.resetFineTuning,
+// ── Language card ─────────────────────────────────────────────────────────────
+function LangCard({ lang, label, flag, active, onPress, accent }: {
+  lang: Lang; label: string; flag: string; active: boolean; onPress: () => void; accent: string;
+}) {
+  const t     = useVeilStore(s => s.theme);
+  const scale = useSharedValue(1);
+  const anim  = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+  return (
+    <Pressable
+      style={{ flex: 1 }}
+      onPressIn={() => { scale.value = withSpring(0.97, { damping: 22, stiffness: 350 }); }}
+      onPressOut={() => { scale.value = withSpring(1,    { damping: 20, stiffness: 300 }); }}
+      onPress={onPress}
+    >
+      <Animated.View style={[lc.card, { backgroundColor: t.card, borderColor: active ? accent : t.border }, anim]}>
+        <Text style={lc.flag}>{flag}</Text>
+        <Text style={[lc.label, { color: active ? accent : t.textMuted }]}>{label}</Text>
+        {active && <View style={[lc.dot, { backgroundColor: accent }]} />}
+      </Animated.View>
+    </Pressable>
+  );
+}
+const lc = StyleSheet.create({
+  card:  { borderRadius: 14, borderWidth: 1.5, padding: 14, alignItems: 'center', gap: 6 },
+  flag:  { fontSize: 28 },
+  label: { fontSize: 13, fontWeight: '600' },
+  dot:   { width: 5, height: 5, borderRadius: 3 },
+});
+
+// ── Personalisation card ──────────────────────────────────────────────────────
+function PersonalisationCard() {
+  const { t, ft, lang, resetFineTuning } = useVeilStore(s => ({
+    t: s.theme, ft: s.fineTuningState, lang: s.lang, resetFineTuning: s.resetFineTuning,
   }));
+  const tr = TRANSLATIONS[lang].settings;
 
   const total    = ft.totalConfirmations;
   const counts   = ft.counts;
   const maxCount = Math.max(...EMOTIONS.map(e => counts[e.id] ?? 0), 1);
-
-  // Personalization level: 0-100%, capped at 50 confirmations = 100%
   const level    = Math.min(100, Math.round((total / 50) * 100));
 
   const confirmReset = () => Alert.alert(
-    'Reset personalisation?',
-    'The model will return to its default state. Your voice entries stay. Cannot be undone.',
+    tr.resetPersonalTitle,
+    tr.resetPersonalMsg,
     [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Reset', style: 'destructive', onPress: resetFineTuning },
+      { text: tr.cancel, style: 'cancel' },
+      { text: tr.reset,  style: 'destructive', onPress: resetFineTuning },
     ],
   );
 
   return (
     <View style={[pc.card, { backgroundColor: t.card, borderColor: t.border }]}>
-      {/* Header row */}
       <View style={pc.headerRow}>
         <View>
           <Text style={[pc.heading, { color: t.text }]}>
-            {total === 0 ? 'not yet personalised' : `${level}% personalised`}
+            {total === 0 ? tr.notPersonalised : tr.personalised(level)}
           </Text>
           <Text style={[pc.sub, { color: t.textMuted }]}>
-            {total === 0
-              ? 'save voice entries to adapt the model to your voice'
-              : `${total} voice ${total === 1 ? 'confirmation' : 'confirmations'} · model adapts on-device`}
+            {total === 0 ? tr.personalSub0 : tr.personalSubN(total)}
           </Text>
         </View>
       </View>
 
-      {/* Personalisation level bar */}
       {total > 0 && (
         <View style={[pc.levelTrack, { backgroundColor: t.border }]}>
           <View style={[pc.levelFill, { width: `${level}%` as any, backgroundColor: t.accent }]} />
         </View>
       )}
 
-      {/* Per-emotion dots */}
       {total > 0 && (
         <View style={pc.emotionGrid}>
           {EMOTIONS.map(e => {
@@ -129,7 +153,6 @@ function PersonalizationCard() {
             const fill  = count / maxCount;
             return (
               <View key={e.id} style={pc.emotionItem}>
-                {/* Mini stacked bars */}
                 <View style={[pc.barTrack, { backgroundColor: t.border }]}>
                   <View style={[pc.barFill, {
                     height: `${Math.max(fill * 100, count > 0 ? 15 : 0)}%` as any,
@@ -139,27 +162,23 @@ function PersonalizationCard() {
                 <Text style={[pc.emotionLabel, { color: count > 0 ? e.color : t.textDim }]}>
                   {e.label.slice(0, 3)}
                 </Text>
-                {count > 0 && (
-                  <Text style={[pc.emotionCount, { color: t.textDim }]}>{count}</Text>
-                )}
+                {count > 0 && <Text style={[pc.emotionCount, { color: t.textDim }]}>{count}</Text>}
               </View>
             );
           })}
         </View>
       )}
 
-      {/* Reset button */}
       {total > 0 && (
         <Pressable onPress={confirmReset} style={({ pressed }) => [
           pc.resetBtn, { borderColor: t.danger + '55', opacity: pressed ? 0.7 : 1 }
         ]}>
-          <Text style={[pc.resetText, { color: t.danger }]}>reset personalisation</Text>
+          <Text style={[pc.resetText, { color: t.danger }]}>{tr.resetPersonal}</Text>
         </Pressable>
       )}
     </View>
   );
 }
-
 const pc = StyleSheet.create({
   card:         { borderRadius: 16, borderWidth: 0.5, padding: 16, marginBottom: 8 },
   headerRow:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 },
@@ -179,16 +198,22 @@ const pc = StyleSheet.create({
 
 // ── Screen ────────────────────────────────────────────────────────────────────
 export default function SettingsScreen() {
-  const { t, themeMode, setThemeMode, stats, resetCheckIns, resetVoiceEntries, resetAllData } = useVeilStore(s => ({
+  const {
+    t, themeMode, setThemeMode, lang, setLang,
+    stats, resetCheckIns, resetVoiceEntries, resetAllData,
+  } = useVeilStore(s => ({
     t: s.theme, themeMode: s.themeMode, setThemeMode: s.setThemeMode,
+    lang: s.lang, setLang: s.setLang,
     stats: s.stats, resetCheckIns: s.resetCheckIns,
     resetVoiceEntries: s.resetVoiceEntries, resetAllData: s.resetAllData,
   }));
 
+  const tr = TRANSLATIONS[lang].settings;
+
   const confirmReset = (title: string, msg: string, action: () => Promise<void>) =>
     Alert.alert(title, msg, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: action },
+      { text: tr.cancel, style: 'cancel' },
+      { text: tr.delete, style: 'destructive', onPress: action },
     ]);
 
   return (
@@ -197,48 +222,56 @@ export default function SettingsScreen() {
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.content}>
 
           <View style={s.header}>
-            <Text style={[s.title, { color: t.text }]}>settings</Text>
+            <Text style={[s.title, { color: t.text }]}>{tr.title}</Text>
           </View>
 
           {/* Appearance */}
-          <Text style={[s.sectionLabel, { color: t.textDim }]}>appearance</Text>
+          <Text style={[s.sectionLabel, { color: t.textDim }]}>{tr.appearance}</Text>
           <View style={s.themeRow}>
-            <ThemeCard mode="dark"  label="dark"  active={themeMode === 'dark'}  accent={t.accent} onPress={() => setThemeMode('dark')} />
+            <ThemeCard mode="dark"  label={tr.dark}  active={themeMode === 'dark'}  accent={t.accent} onPress={() => setThemeMode('dark')} />
             <View style={{ width: 12 }} />
-            <ThemeCard mode="light" label="light" active={themeMode === 'light'} accent={t.accent} onPress={() => setThemeMode('light')} />
+            <ThemeCard mode="light" label={tr.light} active={themeMode === 'light'} accent={t.accent} onPress={() => setThemeMode('light')} />
+          </View>
+
+          {/* Language */}
+          <Text style={[s.sectionLabel, { color: t.textDim }]}>{tr.language}</Text>
+          <View style={s.themeRow}>
+            <LangCard lang="en" label="English" flag="🇬🇧" active={lang === 'en'} accent={t.accent} onPress={() => setLang('en')} />
+            <View style={{ width: 12 }} />
+            <LangCard lang="ru" label="Русский" flag="🇷🇺" active={lang === 'ru'} accent={t.accent} onPress={() => setLang('ru')} />
           </View>
 
           {/* Personalisation */}
-          <Text style={[s.sectionLabel, { color: t.textDim }]}>personalisation</Text>
-          <PersonalizationCard />
+          <Text style={[s.sectionLabel, { color: t.textDim }]}>{tr.personalisation}</Text>
+          <PersonalisationCard />
 
           {/* Data */}
-          <Text style={[s.sectionLabel, { color: t.textDim }]}>data</Text>
+          <Text style={[s.sectionLabel, { color: t.textDim }]}>{tr.data}</Text>
           <ActionRow
-            label="clear check-ins"
-            sub={`${stats?.totalEntries ?? 0} entries`}
-            onPress={() => confirmReset('Clear check-ins?', 'This will delete all check-in history. Cannot be undone.', resetCheckIns)}
+            label={tr.clearCheckins}
+            sub={tr.entries(stats?.totalEntries ?? 0)}
+            onPress={() => confirmReset(tr.clearCheckinsTitle, tr.clearCheckinsMsg, resetCheckIns)}
           />
           <ActionRow
-            label="clear voice entries"
-            onPress={() => confirmReset('Clear voice entries?', 'This will delete all voice journal recordings. Cannot be undone.', resetVoiceEntries)}
+            label={tr.clearVoice}
+            onPress={() => confirmReset(tr.clearVoiceTitle, tr.clearVoiceMsg, resetVoiceEntries)}
           />
           <ActionRow
-            label="clear all data"
+            label={tr.clearAll}
             color={t.danger}
-            sub="check-ins + voice entries"
-            onPress={() => confirmReset('Clear everything?', 'This will permanently delete all your data. Cannot be undone.', resetAllData)}
+            sub={tr.clearAllSub}
+            onPress={() => confirmReset(tr.clearAllTitle, tr.clearAllMsg, resetAllData)}
           />
 
           {/* About */}
-          <Text style={[s.sectionLabel, { color: t.textDim }]}>about</Text>
+          <Text style={[s.sectionLabel, { color: t.textDim }]}>{tr.about}</Text>
           <View style={[s.aboutCard, { backgroundColor: t.card, borderColor: t.border }]}>
             {[
-              { k: 'version', v: '1.0.0',                vColor: t.text },
-              { k: 'ml audio',  v: 'prototype-net-v2',   vColor: t.text },
-              { k: 'ml patterns', v: 'bayes-net-v2',     vColor: t.text },
-              { k: 'storage',  v: 'on-device only',       vColor: t.text },
-              { k: 'network',  v: 'zero requests',        vColor: t.teal },
+              { k: tr.version,    v: '1.0.0',             vColor: t.text },
+              { k: tr.mlAudio,    v: 'prototype-net-v2',   vColor: t.text },
+              { k: tr.mlPatterns, v: 'bayes-net-v2',       vColor: t.text },
+              { k: tr.storage,    v: tr.storageVal,         vColor: t.text },
+              { k: tr.network,    v: tr.networkVal,         vColor: t.teal },
             ].map((item, i, arr) => (
               <React.Fragment key={item.k}>
                 <View style={s.aboutRow}>
@@ -250,9 +283,7 @@ export default function SettingsScreen() {
             ))}
           </View>
 
-          <Text style={[s.privacy, { color: t.textDim }]}>
-            Veil never sends data anywhere. Everything stays on your device. Zero bytes to the cloud.
-          </Text>
+          <Text style={[s.privacy, { color: t.textDim }]}>{tr.privacy}</Text>
 
         </ScrollView>
       </SafeAreaView>

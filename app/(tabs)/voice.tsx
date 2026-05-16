@@ -9,7 +9,8 @@ import Animated, {
 import { Audio } from 'expo-av';
 import { FadeScreen } from '../../src/components/FadeScreen';
 import { useVeilStore } from '../../src/store/useStore';
-import { EMOTIONS, getEmotion } from '../../src/constants/emotions';
+import { EMOTIONS, getEmotion, getEmotionLabel } from '../../src/constants/emotions';
+import { TRANSLATIONS } from '../../src/i18n/translations';
 import { dbToAmplitude, extractFeatures, classifyEmotion, featureDescription } from '../../src/engine/emotionEngine';
 import type { EmotionId } from '../../src/types';
 
@@ -56,9 +57,10 @@ function SaveBtn({ onPress, label, color, disabled, textColor }: {
 }
 
 export default function VoiceScreen() {
-  const { voiceEntries, addVoiceEntry, t } = useVeilStore(s => ({
-    voiceEntries: s.voiceEntries, addVoiceEntry: s.addVoiceEntry, t: s.theme,
+  const { voiceEntries, addVoiceEntry, t, lang } = useVeilStore(s => ({
+    voiceEntries: s.voiceEntries, addVoiceEntry: s.addVoiceEntry, t: s.theme, lang: s.lang,
   }));
+  const tr = TRANSLATIONS[lang].voice;
 
   const [phase, setPhase]       = useState<Phase>('idle');
   const [secs, setSecs]         = useState(0);
@@ -107,7 +109,7 @@ export default function VoiceScreen() {
   const start = async () => {
     try {
       const { status } = await Audio.requestPermissionsAsync();
-      if (status !== 'granted') { Alert.alert('Permission required', 'Please allow microphone access in Settings.'); return; }
+      if (status !== 'granted') { Alert.alert(tr.permTitle, tr.permMsg); return; }
       await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true, staysActiveInBackground: false, shouldDuckAndroid: true });
       const { recording } = await Audio.Recording.createAsync({
         android: { extension: '.m4a', outputFormat: Audio.AndroidOutputFormat.MPEG_4, audioEncoder: Audio.AndroidAudioEncoder.AAC, sampleRate: 44100, numberOfChannels: 1, bitRate: 128000 },
@@ -128,7 +130,7 @@ export default function VoiceScreen() {
           }
         } catch { }
       }, 100);
-    } catch (err) { console.error(err); Alert.alert('Could not start recording', String(err)); }
+    } catch (err) { console.error(err); Alert.alert(tr.errorMsg, String(err)); }
   };
 
   const stop = async () => {
@@ -170,8 +172,8 @@ export default function VoiceScreen() {
     <FadeScreen>
       <SafeAreaView style={[s.safe, { backgroundColor: t.bg }]} edges={['top']}>
         <View style={s.header}>
-          <Text style={[s.title, { color: t.text }]}>voice journal</Text>
-          <Text style={[s.sub, { color: t.textDim }]}>tell me about your day</Text>
+          <Text style={[s.title, { color: t.text }]}>{tr.title}</Text>
+          <Text style={[s.sub, { color: t.textDim }]}>{tr.subtitle}</Text>
         </View>
 
         <View style={s.micArea}>
@@ -199,39 +201,41 @@ export default function VoiceScreen() {
             </>
           )}
 
-          {phase === 'idle'       && <Text style={[s.hint, { color: t.textDim }]}>tap to start recording</Text>}
-          {phase === 'processing' && <Text style={[s.hint, { color: t.textDim }]}>running local neural model...</Text>}
+          {phase === 'idle'       && <Text style={[s.hint, { color: t.textDim }]}>{tr.tapToStart}</Text>}
+          {phase === 'processing' && <Text style={[s.hint, { color: t.textDim }]}>{tr.analyzing}</Text>}
 
           {phase === 'done' && result && (
             <Animated.View style={[s.resultCard, { backgroundColor: t.card, borderColor: t.border }, resultStyle]}>
               <Text style={[s.resultBadge, { color: t.textMuted }]}>
-                {result.emotion === result.modelEmotion ? 'veil hears' : `model heard ${getEmotion(result.modelEmotion).label}`}
+                {result.emotion === result.modelEmotion
+                  ? tr.veilHears
+                  : tr.modelHeard(getEmotionLabel(result.modelEmotion, lang))}
               </Text>
               <Text style={[s.resultEmo, { color: getEmotion(result.emotion).color }]}>
-                {getEmotion(result.emotion).label}
+                {getEmotionLabel(result.emotion, lang)}
               </Text>
               <Text style={[s.resultDesc, { color: t.textMuted }]}>{result.desc}</Text>
               <View style={s.choiceGrid}>
                 {EMOTIONS.map(e => (
-                  <ChoiceChip key={e.id} label={e.label} active={e.id === result.emotion}
+                  <ChoiceChip key={e.id} label={getEmotionLabel(e.id, lang)} active={e.id === result.emotion}
                     color={e.color} onPress={() => chooseEmotion(e.id)}
                     chipBg={t.chip} chipBorder={t.border} chipText={t.textMuted} />
                 ))}
               </View>
               <View style={s.pillRow}>
-                {([
-                  ['confidence', `${Math.round(result.confidence * 100)}%`],
-                  ['energy',     `${Math.round((result.features.energy ?? 0) * 100)}%`],
-                  ['stability',  `${Math.round((result.features.stability ?? result.features.variance ?? 0) * 100)}%`],
-                ] as [string, string][]).map(([l, v]) => (
+              {([  
+              [tr.confidence, `${Math.round(result.confidence * 100)}%`],
+              [tr.energy,     `${Math.round((result.features.energy ?? 0) * 100)}%`],
+              [tr.stability,  `${Math.round((result.features.stability ?? result.features.variance ?? 0) * 100)}%`],
+              ] as [string, string][]).map(([l, v]) => (
                   <View key={l} style={[s.pill, { backgroundColor: t.chip }]}>
                     <Text style={[s.pillLabel, { color: t.textDim }]}>{l}</Text>
                     <Text style={[s.pillVal, { color: t.text }]}>{v}</Text>
                   </View>
                 ))}
               </View>
-              <Text style={[s.privacy, { color: t.textDim }]}>{result.modelVersion} · on-device · 0 bytes to cloud</Text>
-              <SaveBtn onPress={saveVoiceResult} label={saving ? 'saving...' : 'save emotion'}
+              <Text style={[s.privacy, { color: t.textDim }]}>{tr.privacy(result.modelVersion)}</Text>
+              <SaveBtn onPress={saveVoiceResult} label={saving ? tr.saving : tr.saveEmotion}
                 color={getEmotion(result.emotion).color} disabled={saving} textColor={t.textOnAccent} />
             </Animated.View>
           )}
@@ -239,16 +243,16 @@ export default function VoiceScreen() {
 
         {voiceEntries.length > 0 && (
           <View style={s.recent}>
-            <Text style={[s.recentLabel, { color: t.textDim }]}>recent</Text>
+            <Text style={[s.recentLabel, { color: t.textDim }]}>{tr.recent}</Text>
             {voiceEntries.slice(0, 3).map(e => {
               const emo = getEmotion(e.detectedEmotion);
               const corrected = (e as any).modelEmotion && (e as any).modelEmotion !== e.detectedEmotion;
               return (
                 <View key={e.id} style={[s.entryRow, { borderTopColor: t.border }]}>
                   <View style={[s.entryDot, { backgroundColor: emo.color }]} />
-                  <Text style={[s.entryEmo, { color: emo.color }]}>{emo.label}</Text>
+                  <Text style={[s.entryEmo, { color: emo.color }]}>{getEmotionLabel(e.detectedEmotion, lang)}</Text>
                   <Text style={[s.entryMeta, { color: t.textMuted }]}>
-                    {e.durationSeconds}s · {Math.round(e.confidence * 100)}%{corrected ? ' · corrected' : ''}
+                    {e.durationSeconds}s · {Math.round(e.confidence * 100)}%{corrected ? ` · ${tr.corrected}` : ''}
                   </Text>
                   <Text style={[s.entryTime, { color: t.textDim }]}>
                     {new Date(e.createdAt).toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' })}

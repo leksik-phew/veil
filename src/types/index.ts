@@ -14,6 +14,7 @@ export type TriggerId =
   | 'exercise' | 'money' | 'loneliness' | 'success';
 
 export type ThemeMode = 'dark' | 'light';
+export type Lang = 'en' | 'ru';
 
 export interface CheckIn {
   id: number;

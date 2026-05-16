@@ -7,6 +7,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { FadeScreen } from '../../src/components/FadeScreen';
 import { useVeilStore } from '../../src/store/useStore';
+import { TRANSLATIONS } from '../../src/i18n/translations';
 
 type Phase = 'idle' | 'inhale' | 'hold' | 'exhale' | 'pause' | 'done';
 
@@ -26,13 +27,6 @@ const RING_COLORS = [
   '#4ecdc4', '#FFD93D', '#8b7cf8',
   'rgba(180,180,180,0.4)', '#6BCB77',
 ];
-
-const PRACTICES = [
-  { name: '5-4-3-2-1 grounding',    desc: '5 things you can see...' },
-  { name: 'progressive relaxation', desc: 'tension and release of muscle groups' },
-  { name: 'body scan meditation',   desc: 'scan sensations from head to toe' },
-];
-
 const TEXT_COLORS = [
   'rgba(78,205,196,0.5)',
   '#4ecdc4', '#FFD93D', '#8b7cf8',
@@ -40,15 +34,12 @@ const TEXT_COLORS = [
 ];
 
 export default function BreatheScreen() {
-  const t = useVeilStore(s => s.theme);
+  const t    = useVeilStore(s => s.theme);
+  const lang = useVeilStore(s => s.lang);
+  const tr   = TRANSLATIONS[lang].breathe;
 
   const INNER_COLORS = [
-    t.bg,
-    t.teal + '28',
-    '#FFD93D28',
-    t.accent + '28',
-    t.border,
-    '#6BCB7728',
+    t.bg, t.teal + '28', '#FFD93D28', t.accent + '28', t.border, '#6BCB7728',
   ];
 
   const [phase, setPhase]   = useState<Phase>('idle');
@@ -70,17 +61,10 @@ export default function BreatheScreen() {
     );
   };
 
-  const ringStyle  = useAnimatedStyle(() => ({
-    borderColor: interpolateColor(phaseProgress.value, IDX_INPUT, RING_COLORS),
-  }));
-  const innerStyle = useAnimatedStyle(() => ({
-    backgroundColor: interpolateColor(phaseProgress.value, IDX_INPUT, INNER_COLORS),
-    transform: [{ scale: scaleValue.value }],
-  }));
-  const countColorStyle = useAnimatedStyle(() => ({
-    color: interpolateColor(phaseProgress.value, IDX_INPUT, TEXT_COLORS),
-  }));
-  const countFadeStyle = useAnimatedStyle(() => ({ opacity: countOpacity.value }));
+  const ringStyle       = useAnimatedStyle(() => ({ borderColor: interpolateColor(phaseProgress.value, IDX_INPUT, RING_COLORS) }));
+  const innerStyle      = useAnimatedStyle(() => ({ backgroundColor: interpolateColor(phaseProgress.value, IDX_INPUT, INNER_COLORS), transform: [{ scale: scaleValue.value }] }));
+  const countColorStyle = useAnimatedStyle(() => ({ color: interpolateColor(phaseProgress.value, IDX_INPUT, TEXT_COLORS) }));
+  const countFadeStyle  = useAnimatedStyle(() => ({ opacity: countOpacity.value }));
 
   const pulseCount = () => {
     countOpacity.value = withTiming(0.35, { duration: 80 }, () => {
@@ -117,12 +101,17 @@ export default function BreatheScreen() {
 
   const active = phase !== 'idle' && phase !== 'done';
 
+  // Translated phase label
+  const phaseLabel: Record<string, string> = {
+    inhale: tr.inhale, hold: tr.hold, exhale: tr.exhale, pause: tr.pause,
+  };
+
   return (
     <FadeScreen>
       <SafeAreaView style={[s.safe, { backgroundColor: t.bg }]} edges={['top']}>
         <View style={s.header}>
-          <Text style={[s.title, { color: t.text }]}>breathe</Text>
-          <Text style={[s.sub, { color: t.textDim }]}>4-7-8 technique</Text>
+          <Text style={[s.title, { color: t.text }]}>{tr.title}</Text>
+          <Text style={[s.sub, { color: t.textDim }]}>{tr.subtitle}</Text>
         </View>
 
         <View style={s.circleArea}>
@@ -130,39 +119,49 @@ export default function BreatheScreen() {
             <Animated.View style={[s.ring, ringStyle]}>
               <Animated.View style={[s.inner, innerStyle]}>
                 {phase === 'idle' ? (
-                  <Text style={[s.idleText, { color: t.textDim }]}>tap to{'\n'}begin</Text>
+                  <Text style={[s.idleText, { color: t.textDim }]}>{tr.tapToBegin}</Text>
                 ) : phase === 'done' ? (
-                  <><Text style={[s.countText, { color: '#6BCB77' }]}>✓</Text>
-                  <Text style={[s.phaseText, { color: t.textMuted }]}>done</Text></>
+                  <>
+                    <Text style={[s.countText, { color: '#6BCB77' }]}>✓</Text>
+                    <Text style={[s.phaseText, { color: t.textMuted }]}>{tr.done}</Text>
+                  </>
                 ) : (
-                  <><Animated.Text style={[s.countText, countColorStyle, countFadeStyle]}>{count}</Animated.Text>
-                  <Text style={[s.phaseText, { color: t.textMuted }]}>{phase}</Text></>
+                  <>
+                    <Animated.Text style={[s.countText, countColorStyle, countFadeStyle]}>{count}</Animated.Text>
+                    <Text style={[s.phaseText, { color: t.textMuted }]}>{phaseLabel[phase] ?? phase}</Text>
+                  </>
                 )}
               </Animated.View>
             </Animated.View>
           </Pressable>
 
           <View style={s.phaseRow}>
-            {[{ id: 'inhale', n: 4, c: '#4ecdc4' }, { id: 'hold', n: 7, c: '#FFD93D' }, { id: 'exhale', n: 8, c: t.accent }].map(p => (
+            {([
+              { id: 'inhale', n: 4, c: '#4ecdc4' },
+              { id: 'hold',   n: 7, c: '#FFD93D' },
+              { id: 'exhale', n: 8, c: t.accent  },
+            ] as const).map(p => (
               <View key={p.id} style={s.phaseInfo}>
                 <Text style={[s.phaseN, { color: phase === p.id ? p.c : t.textDim }]}>{p.n}s</Text>
-                <Text style={[s.phaseName, { color: t.textDim }]}>{p.id}</Text>
+                <Text style={[s.phaseName, { color: t.textDim }]}>{phaseLabel[p.id]}</Text>
               </View>
             ))}
           </View>
 
-          {active && <Text style={[s.cycleText, { color: t.textMuted }]}>cycle {cycles + 1} / 3</Text>}
+          {active && (
+            <Text style={[s.cycleText, { color: t.textMuted }]}>
+              {tr.cycle(cycles + 1, 3)}
+            </Text>
+          )}
         </View>
 
         <View style={[s.infoCard, { backgroundColor: t.card, borderColor: t.border }]}>
-          <Text style={[s.infoText, { color: t.textMuted }]}>
-            Activates the parasympathetic nervous system · reduces anxiety in 2–3 cycles
-          </Text>
+          <Text style={[s.infoText, { color: t.textMuted }]}>{tr.infoText}</Text>
         </View>
 
         <View style={s.practices}>
-          <Text style={[s.practicesLabel, { color: t.textDim }]}>other practices</Text>
-          {PRACTICES.map(p => (
+          <Text style={[s.practicesLabel, { color: t.textDim }]}>{tr.otherPractices}</Text>
+          {tr.practices.map(p => (
             <View key={p.name} style={[s.practiceRow, { borderTopColor: t.border }]}>
               <View style={[s.practiceDot, { backgroundColor: t.accent + '66' }]} />
               <View style={{ flex: 1 }}>

@@ -12,11 +12,11 @@ import Animated, {
 } from 'react-native-reanimated';
 import PlutchikWheel from '../../src/components/PlutchikWheel';
 import { FadeScreen } from '../../src/components/FadeScreen';
-import { TRIGGERS, getEmotion } from '../../src/constants/emotions';
+import { TRIGGERS, getEmotion, getEmotionLabel } from '../../src/constants/emotions';
 import { useVeilStore } from '../../src/store/useStore';
+import { TRANSLATIONS } from '../../src/i18n/translations';
 import type { EmotionId, TriggerId } from '../../src/types';
 
-// ── Animated button ───────────────────────────────────────────────────────────
 function PressBtn({ onPress, style, textStyle, label, disabled = false }: {
   onPress: () => void; style: any; textStyle: any; label: string; disabled?: boolean;
 }) {
@@ -35,9 +35,8 @@ function PressBtn({ onPress, style, textStyle, label, disabled = false }: {
   );
 }
 
-// ── Animated chip ─────────────────────────────────────────────────────────────
 function AnimChip({ active, onPress, label, t }: {
-  active: boolean; onPress: () => void; label: string; t: ReturnType<typeof useVeilStore<any>>;
+  active: boolean; onPress: () => void; label: string; t: any;
 }) {
   const scale = useSharedValue(1);
   const anim  = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
@@ -49,26 +48,24 @@ function AnimChip({ active, onPress, label, t }: {
     >
       <Animated.View style={[
         { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, borderWidth: 1,
-          backgroundColor: active ? t.chipActive   : t.chip,
+          backgroundColor: active ? t.chipActive : t.chip,
           borderColor:     active ? t.chipBorderActive : t.border,
         }, anim,
       ]}>
-        <Text style={{ fontSize: 14, color: active ? t.chipTextActive : t.textMuted }}>
-          {label}
-        </Text>
+        <Text style={{ fontSize: 14, color: active ? t.chipTextActive : t.textMuted }}>{label}</Text>
       </Animated.View>
     </Pressable>
   );
 }
 
-// ── Intensity slider ──────────────────────────────────────────────────────────
+// ── Slider ────────────────────────────────────────────────────────────────────
 const THUMB = 28, HALF = 14, TRACK_H = 5;
 function calcX(v: number, w: number)   { 'worklet'; return HALF + ((v - 1) / 9) * (w - THUMB); }
 function calcVal(x: number, w: number) { 'worklet'; return Math.round(Math.min(10, Math.max(1, 1 + ((x - HALF) / Math.max(w - THUMB, 1)) * 9))); }
 function clampX(x: number, w: number)  { 'worklet'; return Math.min(Math.max(x, HALF), w - HALF); }
 
 function IntensitySlider({ value, onChange, color, t }: {
-  value: number; onChange: (v: number) => void; color: string; t: ReturnType<typeof useVeilStore<any>>;
+  value: number; onChange: (v: number) => void; color: string; t: any;
 }) {
   const trackW = useSharedValue(1);
   const posX   = useSharedValue(HALF);
@@ -138,7 +135,9 @@ function isSameWeek(dateStr: string, now: Date) {
   sw.setDate(now.getDate() - now.getDay()); sw.setHours(0, 0, 0, 0);
   return d >= sw;
 }
-function WeeklyDigest({ checkIns, t }: { checkIns: any[]; t: ReturnType<typeof useVeilStore<any>> }) {
+
+function WeeklyDigest({ checkIns, t, lang }: { checkIns: any[]; t: any; lang: string }) {
+  const tr   = TRANSLATIONS[lang as 'en' | 'ru'].checkin;
   const now  = new Date();
   const week = checkIns.filter(c => isSameWeek(c.createdAt, now));
   if (week.length < 2) return null;
@@ -147,19 +146,21 @@ function WeeklyDigest({ checkIns, t }: { checkIns: any[]; t: ReturnType<typeof u
   for (const c of week) emoCounts[c.emotion] = (emoCounts[c.emotion] ?? 0) + 1;
   const topEmoId = Object.entries(emoCounts).sort((a, b) => b[1] - a[1])[0]?.[0] as EmotionId | undefined;
   const topEmo   = topEmoId ? getEmotion(topEmoId) : null;
-  const label    = avg >= 7 ? 'great week ✨' : avg >= 5 ? 'solid week' : 'tough week';
+  const label    = avg >= 7 ? tr.greatWeek : avg >= 5 ? tr.solidWeek : tr.toughWeek;
   return (
     <View style={[wd.card, { backgroundColor: t.accentDim, borderColor: t.chipBorderActive }]}>
       <View style={wd.row}>
-        <Text style={[wd.weekLabel, { color: t.textDim }]}>this week</Text>
+        <Text style={[wd.weekLabel, { color: t.textDim }]}>{tr.weekLabel}</Text>
         <Text style={[wd.moodLabel, { color: t.accent }]}>{label}</Text>
         <View style={[wd.divider, { backgroundColor: t.border }]} />
         <Text style={[wd.val, { color: t.accent }]}>{avg}/10</Text>
-        <Text style={[wd.sub, { color: t.textDim }]}>avg</Text>
+        <Text style={[wd.sub, { color: t.textDim }]}>{tr.avg}</Text>
         {topEmo && (<>
           <View style={[wd.divider, { backgroundColor: t.border }]} />
-          <Text style={[wd.val, { color: topEmo.color }]}>{topEmo.label}</Text>
-          <Text style={[wd.sub, { color: t.textDim }]}>felt</Text>
+          <Text style={[wd.val, { color: topEmo.color }]}>
+            {getEmotionLabel(topEmo.id, lang as 'en' | 'ru')}
+          </Text>
+          <Text style={[wd.sub, { color: t.textDim }]}>{tr.felt}</Text>
         </>)}
       </View>
     </View>
@@ -177,9 +178,12 @@ const wd = StyleSheet.create({
 
 // ── Screen ────────────────────────────────────────────────────────────────────
 export default function CheckInScreen() {
-  const { addCheckIn, checkIns, t } = useVeilStore(s => ({
-    addCheckIn: s.addCheckIn, checkIns: s.checkIns, t: s.theme,
+  const { addCheckIn, checkIns, t, lang } = useVeilStore(s => ({
+    addCheckIn: s.addCheckIn, checkIns: s.checkIns, t: s.theme, lang: s.lang,
   }));
+  const tr = TRANSLATIONS[lang].checkin;
+  const trTriggers = TRANSLATIONS[lang].triggers;
+
   const [step, setStep]           = useState<1 | 2>(1);
   const [sel, setSel]             = useState<EmotionId | null>(null);
   const [intensity, setInt]       = useState(5);
@@ -214,7 +218,7 @@ export default function CheckInScreen() {
   };
 
   const save = async () => {
-    if (!sel) { Alert.alert('Choose an emotion', 'Tap a segment on the wheel first.'); return; }
+    if (!sel) { Alert.alert(tr.chooseEmotion, tr.chooseTip); return; }
     const parts = [otherActive && otherText ? `#${otherText}` : '', note].filter(Boolean);
     await addCheckIn(sel, intensity, trigs, parts.join(' · ').trim());
     setSaved(true);
@@ -224,19 +228,21 @@ export default function CheckInScreen() {
   const emo      = sel ? getEmotion(sel) : null;
   const btnColor = saved ? t.teal : emo?.color ?? t.accent;
 
+  // Date locale
+  const dateLocale = lang === 'ru' ? 'ru-RU' : 'en-US';
+
   return (
     <FadeScreen>
       <SafeAreaView style={[s.safe, { backgroundColor: t.bg }]} edges={['top']}>
         <RNAnimated.View style={[s.fill, { opacity: fadeAnim }]}>
 
-          {/* ── STEP 1 ── */}
           {step === 1 && (
             <View style={s.fill}>
               <View style={s.header}>
                 <View>
-                  <Text style={[s.title, { color: t.text }]}>how are you feeling?</Text>
+                  <Text style={[s.title, { color: t.text }]}>{tr.title}</Text>
                   <Text style={[s.sub, { color: t.textDim }]}>
-                    {new Date().toLocaleDateString('en', { weekday: 'long', month: 'long', day: 'numeric' })}
+                    {new Date().toLocaleDateString(dateLocale, { weekday: 'long', month: 'long', day: 'numeric' })}
                   </Text>
                 </View>
                 <View style={[s.logo, { backgroundColor: t.accentDim, borderColor: t.chipBorderActive }]}>
@@ -244,29 +250,28 @@ export default function CheckInScreen() {
                 </View>
               </View>
 
-              <WeeklyDigest checkIns={checkIns} t={t} />
+              <WeeklyDigest checkIns={checkIns} t={t} lang={lang} />
 
               <View style={s.wheelWrap}>
                 <PlutchikWheel selected={sel} onSelect={setSel} size={250} />
               </View>
 
               <View style={s.sliderWrap}>
-                <Text style={[s.label, { color: t.textDim }]}>intensity</Text>
+                <Text style={[s.label, { color: t.textDim }]}>{tr.intensity}</Text>
                 <IntensitySlider value={intensity} onChange={setInt} color={emo?.color ?? t.accent} t={t} />
               </View>
 
               <View style={s.footer}>
                 <PressBtn
-                  onPress={() => { if (!sel) { Alert.alert('Choose an emotion'); return; } transitionTo(2); }}
+                  onPress={() => { if (!sel) { Alert.alert(tr.chooseEmotion); return; } transitionTo(2); }}
                   style={[s.btn, { backgroundColor: emo?.color ?? t.accent, opacity: sel ? 1 : 0.4 }]}
                   textStyle={[s.btnText, { color: t.textOnAccent }]}
-                  label="next  →" disabled={!sel}
+                  label={tr.next} disabled={!sel}
                 />
               </View>
             </View>
           )}
 
-          {/* ── STEP 2 ── */}
           {step === 2 && (
             <View style={s.fill}>
               <View style={s.header}>
@@ -283,22 +288,23 @@ export default function CheckInScreen() {
                   borderColor:     (emo?.color ?? t.accent) + '55',
                 }]}>
                   <Text style={[s.emoChipText, { color: emo?.color ?? t.accent }]}>
-                    {emo?.label ?? ''}  ·  {intensity}/10
+                    {emo ? getEmotionLabel(emo.id, lang) : ''}  ·  {intensity}/10
                   </Text>
                 </View>
               </View>
 
               <View style={s.section}>
-                <Text style={[s.label, { color: t.textDim }]}>what triggered this?</Text>
+                <Text style={[s.label, { color: t.textDim }]}>{tr.whatTriggered}</Text>
                 <View style={s.chips}>
-                  {TRIGGERS.map(tr => (
-                    <AnimChip key={tr.id} active={trigs.includes(tr.id)}
-                      onPress={() => toggle(tr.id)} label={tr.label} t={t} />
+                  {TRIGGERS.map(tr2 => (
+                    <AnimChip key={tr2.id} active={trigs.includes(tr2.id)}
+                      onPress={() => toggle(tr2.id)}
+                      label={trTriggers[tr2.id]} t={t} />
                   ))}
                   <AnimChip
                     active={otherActive}
                     onPress={() => { setOther(o => !o); if (otherActive) setOtherText(''); }}
-                    label={otherActive && otherText ? otherText : 'other +'}
+                    label={otherActive && otherText ? otherText : tr.otherChip}
                     t={t}
                   />
                 </View>
@@ -306,7 +312,7 @@ export default function CheckInScreen() {
                   <Animated.View style={otherStyle}>
                     <TextInput
                       value={otherText} onChangeText={setOtherText}
-                      placeholder="describe your trigger..."
+                      placeholder={tr.otherPlaceholder}
                       placeholderTextColor={t.textDim}
                       style={[s.otherInput, { backgroundColor: t.input, borderColor: t.accent + '66', color: t.text }]}
                       autoFocus maxLength={40}
@@ -316,10 +322,10 @@ export default function CheckInScreen() {
               </View>
 
               <View style={s.section}>
-                <Text style={[s.label, { color: t.textDim }]}>note</Text>
+                <Text style={[s.label, { color: t.textDim }]}>{tr.note}</Text>
                 <TextInput
                   value={note} onChangeText={setNote}
-                  placeholder="what's happening inside..."
+                  placeholder={tr.notePlaceholder}
                   placeholderTextColor={t.textDim}
                   multiline numberOfLines={4}
                   style={[s.noteInput, { backgroundColor: t.input, borderColor: t.border, color: t.text }]}
@@ -331,7 +337,7 @@ export default function CheckInScreen() {
                   onPress={save}
                   style={[s.btn, { backgroundColor: btnColor }]}
                   textStyle={[s.btnText, { color: t.textOnAccent }]}
-                  label={saved ? '✓  saved' : 'lift the veil'}
+                  label={saved ? tr.saved : tr.liftTheVeil}
                 />
               </View>
             </View>

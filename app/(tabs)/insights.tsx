@@ -4,12 +4,13 @@ import Animated, { useSharedValue, useAnimatedStyle, withTiming, withDelay, Easi
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { FadeScreen } from '../../src/components/FadeScreen';
 import { useVeilStore } from '../../src/store/useStore';
-import { getEmotion } from '../../src/constants/emotions';
+import { getEmotion, getEmotionLabel } from '../../src/constants/emotions';
+import { TRANSLATIONS } from '../../src/i18n/translations';
 import { buildNeuralPatterns, getPatternModelVersion, voicePatternIntensity } from '../../src/engine/patternModel';
 import type { EmotionId } from '../../src/types';
 
-const DOW_SHORT = ['M','T','W','T','F','S','S'];
-const DOW_FULL  = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const DOW_SHORT_EN = ['M','T','W','T','F','S','S'];
+const DOW_SHORT_RU = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
 
 // Heatmap cell color — accent/red gradient works on both light and dark bg
 function intensityToColor(avg: number | undefined, accent: string): string {
@@ -72,9 +73,18 @@ const ab = StyleSheet.create({
 });
 
 export default function InsightsScreen() {
-  const { checkIns, voiceEntries, t } = useVeilStore(s => ({
-    checkIns: s.checkIns, voiceEntries: s.voiceEntries, t: s.theme,
+  const { checkIns, voiceEntries, t, lang } = useVeilStore(s => ({
+    checkIns: s.checkIns, voiceEntries: s.voiceEntries, t: s.theme, lang: s.lang,
   }));
+  const tr = TRANSLATIONS[lang].insights;
+
+  // Localised day headers for heatmap
+  const DOW_SHORT = lang === 'ru' ? DOW_SHORT_RU : DOW_SHORT_EN;
+
+  // Localised day-of-week names
+  const DOW_FULL = lang === 'ru'
+    ? ['воскресенье','понедельник','вторник','среда','четверг','пятница','суббота']
+    : ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 
   const moodEntries = useMemo(() => [
     ...checkIns.map(e => ({ createdAt: e.createdAt, intensity: e.intensity, emotion: e.emotion })),
@@ -99,7 +109,7 @@ export default function InsightsScreen() {
   }, [moodEntries]);
 
   const heatGrid = useMemo(() => buildGrid(buildDailyMood(moodEntries), 10), [moodEntries]);
-  const patterns = useMemo(() => buildNeuralPatterns(checkIns, voiceEntries), [checkIns, voiceEntries]);
+  const patterns = useMemo(() => buildNeuralPatterns(checkIns, voiceEntries, 4, lang), [checkIns, voiceEntries, lang]);
 
   const insight = useMemo(() => {
     if (moodEntries.length < 5) return null;
@@ -114,10 +124,17 @@ export default function InsightsScreen() {
     if (avgs.length >= 2) {
       const worst = avgs[0], best = avgs[avgs.length - 1];
       const pct = Math.round(((best.avg - worst.avg) / Math.max(best.avg, 0.01)) * 100);
+      if (lang === 'ru') {
+        return `${DOW_FULL[worst.d]} — обычно тяжелее, настроение на ${pct}% ниже, чем в ${DOW_FULL[best.d]}`;
+      }
       return `${DOW_FULL[worst.d]}s tend to be harder — mood is ${pct}% lower than on ${DOW_FULL[best.d]}s`;
     }
-    if (combinedStats.topEmotion) return `Your most frequent emotion lately is ${getEmotion(combinedStats.topEmotion).label}`;
-    return null;
+    if (combinedStats.topEmotion) {
+      const emoName = getEmotionLabel(combinedStats.topEmotion, lang);
+      return lang === 'ru'
+        ? `Твоя самая частая эмоция: ${emoName}`
+        : `Your most frequent emotion lately is ${emoName}`;
+    }
   }, [moodEntries, combinedStats]);
 
   return (
@@ -126,13 +143,13 @@ export default function InsightsScreen() {
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.content}>
 
           <View style={s.header}>
-            <Text style={[s.title, { color: t.text }]}>patterns</Text>
-            <Text style={[s.sub, { color: t.textDim }]}>last 10 weeks</Text>
+            <Text style={[s.title, { color: t.text }]}>{tr.title}</Text>
+            <Text style={[s.sub, { color: t.textDim }]}>{tr.subtitle}</Text>
           </View>
 
           {/* Heatmap */}
           <View style={[s.card, { backgroundColor: t.card, borderColor: t.border }]}>
-            <Text style={[s.label, { color: t.textDim }]}>mood calendar</Text>
+            <Text style={[s.label, { color: t.textDim }]}>{tr.moodCalendar}</Text>
             <View style={s.heatRow}>
               {DOW_SHORT.map((d, i) => <Text key={i} style={[s.heatDayLabel, { color: t.textDim }]}>{d}</Text>)}
             </View>
@@ -144,25 +161,25 @@ export default function InsightsScreen() {
               </View>
             ))}
             <View style={s.legendRow}>
-              <Text style={[s.legendLabel, { color: t.textDim }]}>less</Text>
+              <Text style={[s.legendLabel, { color: t.textDim }]}>{tr.less}</Text>
               {[undefined, 2, 4, 6, 8, 10].map((v, i) => (
                 <View key={i} style={[s.legendCell, { backgroundColor: intensityToColor(v, t.accent) }]} />
               ))}
-              <Text style={[s.legendLabel, { color: t.textDim }]}>more</Text>
+              <Text style={[s.legendLabel, { color: t.textDim }]}>{tr.more}</Text>
             </View>
           </View>
 
           {/* Insight */}
           {insight && (
             <View style={[s.card, s.callout, { backgroundColor: t.card, borderColor: t.border, borderLeftColor: t.accent }]}>
-              <Text style={[s.calloutBadge, { color: t.textMuted }]}>veil notices</Text>
+              <Text style={[s.calloutBadge, { color: t.textMuted }]}>{tr.veilNotices}</Text>
               <Text style={[s.calloutText, { color: t.text }]}>{insight}</Text>
             </View>
           )}
 
           {/* ML Patterns */}
           <View style={[s.card, { backgroundColor: t.card, borderColor: t.border }]}>
-            <Text style={[s.label, { color: t.textDim }]}>ml patterns</Text>
+            <Text style={[s.label, { color: t.textDim }]}>{tr.mlPatterns}</Text>
             {patterns.length > 0 ? patterns.map((c, i) => (
               <View key={c.label} style={s.corrRow}>
                 <View style={{ flex: 1 }}>
@@ -172,22 +189,20 @@ export default function InsightsScreen() {
                 <Text style={[s.corrVal, { color: c.color }]}>{Math.round(c.value * 100)}%</Text>
               </View>
             )) : (
-              <Text style={[s.corrEmpty, { color: t.textMuted }]}>
-                Add check-ins or confirmed voice entries to see your personal patterns here
-              </Text>
+              <Text style={[s.corrEmpty, { color: t.textMuted }]}>{tr.noPatterns}</Text>
             )}
             {patterns.length > 0 && (
-              <Text style={[s.modelTag, { color: t.textDim }]}>{getPatternModelVersion()} · on-device</Text>
+              <Text style={[s.modelTag, { color: t.textDim }]}>{getPatternModelVersion()} · {tr.onDevice}</Text>
             )}
           </View>
 
           {/* Stats 2×2 */}
           <View style={s.statsGrid}>
             {[
-              { label: 'total entries', val: String(combinedStats.totalEntries) },
-              { label: 'day streak',    val: String(combinedStats.streak) },
-              { label: 'avg intensity', val: combinedStats.averageIntensity > 0 ? `${combinedStats.averageIntensity}/10` : '—' },
-              { label: 'top emotion',   val: combinedStats.topEmotion ? getEmotion(combinedStats.topEmotion).label : '—' },
+              { label: tr.totalEntries, val: String(combinedStats.totalEntries) },
+              { label: tr.dayStreak,    val: String(combinedStats.streak) },
+              { label: tr.avgIntensity, val: combinedStats.averageIntensity > 0 ? `${combinedStats.averageIntensity}/10` : '—' },
+              { label: tr.topEmotion,   val: combinedStats.topEmotion ? getEmotionLabel(combinedStats.topEmotion, lang) : '—' },
             ].map(item => (
               <View key={item.label} style={[s.statCard, { backgroundColor: t.card, borderColor: t.border }]}>
                 <Text style={[s.statLabel, { color: t.textDim }]}>{item.label}</Text>

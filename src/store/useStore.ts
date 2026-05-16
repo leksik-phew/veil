@@ -3,7 +3,8 @@ import {
   clearAllData, clearCheckIns, clearVoiceEntries,
   computeWeeklyStats, fetchCheckIns, fetchDailyMood,
   fetchThemeMode, fetchVoiceEntries, insertCheckIn, insertVoiceEntry,
-  saveThemeMode, saveFineTuningState, loadFineTuningState, clearFineTuningState,
+  saveThemeMode, saveLang, fetchLang,
+  saveFineTuningState, loadFineTuningState, clearFineTuningState,
 } from '../db/queries';
 import { getThemeColors, type ThemeColors } from '../constants/emotions';
 import {
@@ -11,22 +12,24 @@ import {
 } from '../engine/localEmotionModel';
 import type {
   AudioFeatures, CheckIn, EmotionId, FineTuningState,
-  ThemeMode, TriggerId, VoiceEntry, WeeklyStats,
+  Lang, ThemeMode, TriggerId, VoiceEntry, WeeklyStats,
 } from '../types';
 
 interface VeilStore {
-  checkIns:         CheckIn[];
-  voiceEntries:     VoiceEntry[];
-  stats:            WeeklyStats | null;
-  moodChart:        { day: string; avg: number }[];
-  heatmapData:      { day: string; avg: number }[];
-  themeMode:        ThemeMode;
-  theme:            ThemeColors;
-  fineTuningState:  FineTuningState;
-  loading:          boolean;
+  checkIns:        CheckIn[];
+  voiceEntries:    VoiceEntry[];
+  stats:           WeeklyStats | null;
+  moodChart:       { day: string; avg: number }[];
+  heatmapData:     { day: string; avg: number }[];
+  themeMode:       ThemeMode;
+  theme:           ThemeColors;
+  lang:            Lang;
+  fineTuningState: FineTuningState;
+  loading:         boolean;
 
   loadAll:           () => Promise<void>;
   setThemeMode:      (mode: ThemeMode) => void;
+  setLang:           (lang: Lang) => void;
   addCheckIn:        (emotion: EmotionId, intensity: number, triggers: TriggerId[], note: string) => Promise<void>;
   addVoiceEntry:     (
     audioPath: string, emotion: EmotionId, modelEmotion: EmotionId,
@@ -46,9 +49,10 @@ const _default = defaultFineTuningState();
 let state: VeilStore = {
   checkIns: [], voiceEntries: [], stats: null, moodChart: [], heatmapData: [],
   themeMode: 'dark', theme: getThemeColors('dark'),
+  lang: 'en',
   fineTuningState: _default,
   loading: false,
-  loadAll: async () => {}, setThemeMode: () => {},
+  loadAll: async () => {}, setThemeMode: () => {}, setLang: () => {},
   addCheckIn: async () => {}, addVoiceEntry: async () => {},
   resetCheckIns: async () => {}, resetVoiceEntries: async () => {},
   resetAllData: async () => {}, resetFineTuning: async () => {},
@@ -65,24 +69,29 @@ Object.assign(state, {
     saveThemeMode(mode).catch(e => console.warn('saveThemeMode:', e));
   },
 
+  setLang: (lang: Lang) => {
+    setState({ lang });
+    saveLang(lang).catch(e => console.warn('saveLang:', e));
+  },
+
   loadAll: async () => {
     setState({ loading: true });
     const [
       checkIns, voiceEntries, stats, moodChart, heatmapData,
-      themeMode, savedFT,
+      themeMode, lang, savedFT,
     ] = await Promise.all([
       fetchCheckIns(200), fetchVoiceEntries(20), computeWeeklyStats(),
-      fetchDailyMood(14), fetchDailyMood(70), fetchThemeMode(),
+      fetchDailyMood(14), fetchDailyMood(70), fetchThemeMode(), fetchLang(),
       loadFineTuningState(),
     ]);
 
-    // Apply persisted fine-tuning to the in-memory model
     const fineTuningState = savedFT ?? defaultFineTuningState();
     if (savedFT) initModelFromState(savedFT);
 
     setState({
       checkIns, voiceEntries, stats, moodChart, heatmapData,
       themeMode, theme: getThemeColors(themeMode),
+      lang,
       fineTuningState, loading: false,
     });
   },
@@ -96,42 +105,21 @@ Object.assign(state, {
     audioPath: string, emotion: EmotionId, modelEmotion: EmotionId,
     confidence: number, features: AudioFeatures, duration: number, modelVersion: string,
   ) => {
-    // 1. Persist the voice entry
     await insertVoiceEntry(audioPath, emotion, modelEmotion, confidence, features, duration, modelVersion);
-
-    // 2. Fine-tune the prototype model with this confirmed label
-    const newFTState = applyConfirmation(
-      features, emotion, modelEmotion, state.fineTuningState,
-    );
-
-    // 3. Persist the updated fine-tuning state
+    const newFTState = applyConfirmation(features, emotion, modelEmotion, state.fineTuningState);
     await saveFineTuningState(newFTState);
-
-    // 4. Update store + reload entries
     setState({ fineTuningState: newFTState });
     await state.loadAll();
   },
 
-  resetCheckIns: async () => {
-    await clearCheckIns();
-    await state.loadAll();
-  },
-
-  resetVoiceEntries: async () => {
-    await clearVoiceEntries();
-    await state.loadAll();
-  },
-
-  resetAllData: async () => {
-    await clearAllData();
-    await state.loadAll();
-  },
+  resetCheckIns: async () => { await clearCheckIns(); await state.loadAll(); },
+  resetVoiceEntries: async () => { await clearVoiceEntries(); await state.loadAll(); },
+  resetAllData: async () => { await clearAllData(); await state.loadAll(); },
 
   resetFineTuning: async () => {
     await clearFineTuningState();
     resetModelToDefaults();
-    const fresh = defaultFineTuningState();
-    setState({ fineTuningState: fresh });
+    setState({ fineTuningState: defaultFineTuningState() });
   },
 });
 
