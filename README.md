@@ -872,11 +872,211 @@ interface VeilBackupFile {
 
 ---
 
+## Home Screen Widget Plan
+
+> **Status:** planned. Requires `npx expo prebuild` + EAS Build. Expo Go will stop working after prebuild — use `expo-dev-client` instead.
+
+### Technical constraints
+
+Home screen widgets are **native OS extensions**, not React components. They run in a separate process with no access to the JS runtime or SQLite directly.
+
+- **iOS:** WidgetKit + SwiftUI (Widget Extension target in Xcode)
+- **Android:** AppWidget framework + RemoteViews (XML layouts + Kotlin)
+- **Data bridge:** a shared JSON payload written by the app to App Groups (iOS) / SharedPreferences (Android) after every check-in, voice entry, and on app launch
+
+---
+
+### Widget catalogue
+
+#### 1. Quick Check-in `◎`
+**Sizes:** Small (2×2), Medium (4×2)
+
+Small shows the last emotion and a prompt. Medium adds a one-tap deep-link button. Tapping anywhere opens the app directly on the check-in wheel (`veil://checkin`). Updates every 15 minutes or immediately after a check-in.
+
+```
+[Small]
+┌─────────────────────┐
+│  ◎  veil            │
+│                     │
+│  how are you        │
+│  feeling?           │
+│                     │
+│  fri, 16 may  9:41  │
+└─────────────────────┘
+
+[Medium]
+┌───────────────────────────────────────┐
+│  ◎ veil              fri, 16 may      │
+│                                       │
+│  last: ● joy   7/10   2h ago          │
+│  ───────────────────────              │
+│  [  how are you feeling?  →  ]        │
+└───────────────────────────────────────┘
+```
+
+---
+
+#### 2. Today's Mood `◈`
+**Sizes:** Medium (4×2), Large (4×4)
+
+Shows today's average intensity, entry count, streak, and top emotions. Large adds a 7-day mini heatmap. Tapping opens the Journal tab (`veil://journal`).
+
+```
+[Medium]
+┌───────────────────────────────────────┐
+│  today                streak: 🔥 7    │
+│                                       │
+│  ████████░░  7.4 / 10    3 entries    │
+│                                       │
+│  ● joy   ● trust   ● anticipation     │
+└───────────────────────────────────────┘
+
+[Large]
+┌─────────────────────────────────────────┐
+│  this week              streak: 🔥 7    │
+│                                         │
+│  M   T   W   T   F   S   S              │
+│  ██  ██  ░░  ██  ██  ░░  ░░             │
+│                                         │
+│  today avg  ████████░░  7.4             │
+│                                         │
+│  ● joy ×3   most frequent               │
+│  ● fear ×1                              │
+└─────────────────────────────────────────┘
+```
+
+---
+
+#### 3. Breathe `◌`
+**Size:** Small (2×2)
+
+Shows last session time. Tapping opens Breathe tab with autostart (`veil://breathe?autostart=1`). The `◌` glyph pulses slowly on iOS 17+ via SwiftUI animation.
+
+```
+┌─────────────────────┐
+│         ◌           │
+│                     │
+│      breathe        │
+│    4 · 7 · 8        │
+│                     │
+│  last: 2h ago       │
+└─────────────────────┘
+```
+
+---
+
+#### 4. Patterns Snapshot `◉`
+**Size:** Large (4×4)
+
+Shows the 10-week heatmap and top 2 ML patterns. Tapping opens the Patterns tab (`veil://patterns`). Updates once per day.
+
+```
+┌─────────────────────────────────────────┐
+│  patterns                   ◉  veil     │
+│                                         │
+│  M  T  W  T  F  S  S  (× 10 weeks)      │
+│  ░  ░  ░  ▓  ▓  ░  ░                    │
+│  ░  ▒  ░  ▒  ▓  ░  ░                    │
+│  ▓  ░  ▒  ▓  ▒  ░  ░                    │
+│  ...                                    │
+│                                         │
+│  work → anger      ████████  82%        │
+│  sleep → sadness   ██████░░  71%        │
+└─────────────────────────────────────────┘
+```
+
+---
+
+### Data bridge — `VeilWidgetPayload`
+
+Written to the shared container after every state change. The native widget reads it synchronously without touching SQLite.
+
+```typescript
+interface VeilWidgetPayload {
+  updatedAt:    string;              // ISO timestamp
+  streak:       number;
+  lastCheckin: {
+    emotion:    EmotionId;
+    intensity:  number;
+    createdAt:  string;
+    color:      string;              // hex — no logic in native code
+  } | null;
+  todayStats: {
+    count:        number;
+    avgIntensity: number;
+    topEmotions:  { id: EmotionId; color: string; count: number }[];
+  };
+  weekMood:     (number | null)[];   // 7 values
+  heatmap:      (number | null)[];   // 70 values (10 weeks × 7 days)
+  topPatterns: {
+    label: string;                   // already localised
+    value: number;                   // 0–1
+    color: string;
+  }[];
+  lastBreathAt: string | null;
+  themeMode:    'dark' | 'light';
+  lang:         'en' | 'ru';
+}
+```
+
+Widget labels are pre-localised in the payload — the native layer renders strings, never translates them.
+
+---
+
+### Deep links
+
+The `veil://` scheme is already registered in `app.json`.
+
+| Widget | URL | Opens |
+|---|---|---|
+| Quick Check-in | `veil://checkin` | `/(tabs)/index` |
+| Today's Mood | `veil://journal` | `/(tabs)/journal` |
+| Breathe | `veil://breathe?autostart=1` | `/(tabs)/breathe` + auto-start |
+| Patterns | `veil://patterns` | `/(tabs)/insights` |
+
+---
+
+### Implementation phases
+
+| Phase | Work | Est. |
+|---|---|---|
+| 0 — Prebuild | `npx expo prebuild`, App Groups entitlements, EAS config | 1 day |
+| 1 — Data bridge | Native module `VeilWidgetBridge` (Swift + Kotlin), `syncWidgetData()` in store | 2–3 days |
+| 2 — iOS widgets | Widget Extension target, SwiftUI views for all 4 widgets × sizes | 4–5 days |
+| 3 — Android widgets | `AppWidgetProvider`, RemoteViews XML layouts, `PendingIntent` deep links | 3–4 days |
+| 4 — Config plugin | `plugins/withVeilWidget.ts` — automates Xcode target + AndroidManifest | 2 days |
+| 5 — Deep links | `autostart` param handling in `breathe.tsx`, E2E test | 1 day |
+| **Total** | | **~2 weeks** |
+
+---
+
 ## Roadmap
 
+### Platform
 - **Push notifications** — daily check-in reminder at a user-configured time via `expo-notifications`
 - **Home screen widget** — one-tap emotion log without opening the app
 - **Sleep + energy inputs** — two extra sliders in check-in step 1; feeds real correlations into patterns
+- **iPad layout** — two-column split view: wheel + journal side by side
+
+### Intelligence (all on-device)
+- **Emotion forecast** — based on weekday, time of day, and recent trend, show a soft prediction: "Historically you feel lower energy on Monday mornings" before the user even opens the wheel
+- **Anomaly detection** — highlight days where the emotion or intensity is a significant outlier from the user's personal baseline; gentle nudge to journal more that day
+- **Correlation explorer** — interactive chart: pick any two variables (trigger × emotion, time of day × intensity, sleep × mood) and see the personal correlation score computed from local data
+- **Voice prosody trends** — track energy, stability, and tempo across all voice entries over time and visualise them as a personal acoustic fingerprint that evolves with fine-tuning
+- **Emotion transition graph** — Sankey or chord diagram showing which emotions follow which across check-ins (e.g. anticipation → joy vs anticipation → fear split by trigger)
+
+### Check-in UX
+- **Quick emotions** — after 30+ check-ins, surface the user's top 3 most frequent emotions as one-tap shortcuts above the wheel
+- **Context auto-tagging** — with permission, read time of day, day of week, and optionally calendar busyness (no event titles) to pre-suggest likely triggers
+- **Streak freeze** — one grace day per week where a missed check-in doesn't break the streak; transparent and opt-in
+- **Intensity history sparkline** — tiny inline chart on the check-in screen showing the last 7 days of intensity so the user can self-calibrate
+
+### Depth features that competitors miss
+- **Anonymous community heatmap** — opt-in aggregate mood map: "People in your timezone feel X on Monday mornings" — computed with differential privacy, no individual data shared, no server profile
+- **Therapist export** — one-tap PDF report with anonymised patterns, weekly averages, and top triggers formatted for sharing with a mental health professional
+- **Emotional vocabulary builder** — Plutchik secondary emotions: after 60+ check-ins, unlock the outer ring of the wheel (love, submission, awe, disapproval, remorse, contempt, aggressiveness, optimism) for finer-grained check-ins
+- **"Why" prompts** — after selecting an emotion, occasionally surface a random short reflective prompt ("What would have made today feel different?") that feeds a separate private notes section, never used for ML
+- **Retrospective view** — a "time machine" mode: pick any past week and re-live it entry by entry, with the patterns and insight callout computed only from data available at that point in time
 
 ---
 
