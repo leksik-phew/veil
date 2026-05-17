@@ -4,7 +4,7 @@ import Animated, { useSharedValue, useAnimatedStyle, withTiming, withDelay, Easi
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { FadeScreen } from '../../src/components/FadeScreen';
 import { useVeilStore } from '../../src/store/useStore';
-import { getEmotion, getEmotionLabel } from '../../src/constants/emotions';
+import { getEmotion, getEmotionLabel, getEmotionColorForText } from '../../src/constants/emotions';
 import { TRANSLATIONS } from '../../src/i18n/translations';
 import { buildNeuralPatterns, getPatternModelVersion, voicePatternIntensity } from '../../src/engine/patternModel';
 import type { EmotionId } from '../../src/types';
@@ -77,6 +77,7 @@ export default function InsightsScreen() {
     checkIns: s.checkIns, voiceEntries: s.voiceEntries, t: s.theme, lang: s.lang,
   }));
   const tr = TRANSLATIONS[lang].insights;
+  const isLight = useVeilStore(s => s.themeMode === 'light');
 
   // Localised day headers for heatmap
   const DOW_SHORT = lang === 'ru' ? DOW_SHORT_RU : DOW_SHORT_EN;
@@ -186,7 +187,7 @@ export default function InsightsScreen() {
                   <Text style={[s.corrLabel, { color: t.textMuted }]}>{c.label}</Text>
                   <AnimatedBar value={c.value} color={c.color} trackColor={t.border} delay={i * 120} />
                 </View>
-                <Text style={[s.corrVal, { color: c.color }]}>{Math.round(c.value * 100)}%</Text>
+                <Text style={[s.corrVal, { color: getEmotionColorForText(c.emotion, isLight) }]}>{Math.round(c.value * 100)}%</Text>
               </View>
             )) : (
               <Text style={[s.corrEmpty, { color: t.textMuted }]}>{tr.noPatterns}</Text>

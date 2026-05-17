@@ -21,22 +21,34 @@ const PHASES = [
 const PHASE_IDX: Record<Phase, number> = {
   idle: 0, inhale: 1, hold: 2, exhale: 3, pause: 4, done: 5,
 };
-const IDX_INPUT   = [0, 1, 2, 3, 4, 5];
-const RING_COLORS = [
-  'rgba(78,205,196,0.35)',
-  '#4ecdc4', '#FFD93D', '#8b7cf8',
-  'rgba(180,180,180,0.4)', '#6BCB77',
-];
-const TEXT_COLORS = [
-  'rgba(78,205,196,0.5)',
-  '#4ecdc4', '#FFD93D', '#8b7cf8',
-  'rgba(180,180,180,0.6)', '#6BCB77',
-];
+const IDX_INPUT = [0, 1, 2, 3, 4, 5];
 
 export default function BreatheScreen() {
   const t    = useVeilStore(s => s.theme);
   const lang = useVeilStore(s => s.lang);
   const tr   = TRANSLATIONS[lang].breathe;
+  const isLight = useVeilStore(s => s.themeMode === 'light');
+
+  // Hold phase gold: #FFD93D is invisible on light bg, use dark amber instead
+  const holdColor = isLight ? '#b8860b' : '#FFD93D';
+
+  const RING_COLORS = [
+    isLight ? 'rgba(26,158,150,0.35)' : 'rgba(78,205,196,0.35)',
+    t.teal,
+    holdColor,
+    t.accent,
+    t.border,
+    '#6BCB77',
+  ];
+
+  const TEXT_COLORS = [
+    isLight ? 'rgba(26,158,150,0.55)' : 'rgba(78,205,196,0.5)',
+    t.teal,
+    holdColor,
+    t.accent,
+    isLight ? 'rgba(20,15,35,0.38)' : 'rgba(180,180,180,0.6)',
+    '#6BCB77',
+  ];
 
   const INNER_COLORS = [
     t.bg, t.teal + '28', '#FFD93D28', t.accent + '28', t.border, '#6BCB7728',
@@ -137,8 +149,8 @@ export default function BreatheScreen() {
 
           <View style={s.phaseRow}>
             {([
-              { id: 'inhale', n: 4, c: '#4ecdc4' },
-              { id: 'hold',   n: 7, c: '#FFD93D' },
+              { id: 'inhale', n: 4, c: t.teal    },
+              { id: 'hold',   n: 7, c: holdColor },
               { id: 'exhale', n: 8, c: t.accent  },
             ] as const).map(p => (
               <View key={p.id} style={s.phaseInfo}>

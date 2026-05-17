@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
-import { getEmotion, getEmotionLabel } from '../constants/emotions';
+import { getEmotion, getEmotionLabel, getEmotionColorForText } from '../constants/emotions';
 import { useVeilStore } from '../store/useStore';
 import { TRANSLATIONS } from '../i18n/translations';
 import type { CheckIn } from '../types';
@@ -9,9 +9,11 @@ import type { CheckIn } from '../types';
 export default function EntryCard({ entry }: { entry: CheckIn }) {
   const t    = useVeilStore(s => s.theme);
   const lang = useVeilStore(s => s.lang);
+  const isLight = useVeilStore(s => s.themeMode === 'light');
 
-  const emotion   = getEmotion(entry.emotion);
-  const emoLabel  = getEmotionLabel(entry.emotion, lang);
+  const emotion    = getEmotion(entry.emotion);
+  const emoLabel   = getEmotionLabel(entry.emotion, lang);
+  const emoColor   = getEmotionColorForText(entry.emotion, isLight);
   const trTriggers = TRANSLATIONS[lang].triggers;
 
   // Locale-aware date formatting
@@ -38,7 +40,7 @@ export default function EntryCard({ entry }: { entry: CheckIn }) {
           <View style={[s.dot, { backgroundColor: emotion.color }]} />
           <View style={s.body}>
             <View style={s.head}>
-              <Text style={[s.emo, { color: emotion.color }]}>{emoLabel}</Text>
+              <Text style={[s.emo, { color: emoColor }]}>{emoLabel}</Text>
               <Text style={[s.time, { color: t.textDim }]}>{dateStr} · {timeStr}</Text>
             </View>
             {entry.triggers.length > 0 && (

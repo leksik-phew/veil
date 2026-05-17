@@ -632,14 +632,28 @@ type ThemeColors = {
 | `accent` | `#8b7cf8` | `#6c5dd3` |
 | `teal` | `#4ecdc4` | `#1a9e96` |
 | `text` | `rgba(255,255,255,0.92)` | `rgba(20,15,35,0.92)` |
-| `textMuted` | `rgba(255,255,255,0.45)` | `rgba(20,15,35,0.55)` |
-| `textDim` | `rgba(255,255,255,0.25)` | `rgba(20,15,35,0.32)` |
+| `textMuted` | `rgba(255,255,255,0.45)` | `rgba(20,15,35,0.62)` |
+| `textDim` | `rgba(255,255,255,0.25)` | `rgba(20,15,35,0.42)` |
+| `border` | `rgba(255,255,255,0.08)` | `rgba(20,15,35,0.14)` |
+| `card` | `rgba(255,255,255,0.04)` | `rgba(20,15,35,0.07)` |
+| `input` | `rgba(255,255,255,0.04)` | `#e8e4dc` |
 | `chipTextActive` | `#c4b8ff` | `#6c5dd3` |
 | `textOnAccent` | `#0d0b14` | `#ffffff` |
 | `wheelCenter` | `#1a1625` | `#ede9e2` |
-| `danger` | `#FF6B6B` | `#cc4040` |
+| `danger` | `#FF6B6B` | `#b32020` |
 
-### Propagation
+For emotion colors in text on light theme: `getEmotionColorForText(id, isLight)` returns dark high-contrast variants instead of the original pastels. Used in `EntryCard`, `voice.tsx`, `insights.tsx`, `index.tsx`.
+
+| Emotion | Original (dark) | Text on light |
+|---|---|---|
+| joy | `#FFD93D` | `#7a5800` |
+| trust | `#6BCB77` | `#1a6b2a` |
+| fear | `#4ECDC4` | `#0a6460` |
+| surprise | `#74B9FF` | `#0a52a0` |
+| sadness | `#A29BFE` | `#4232b0` |
+| disgust | `#FD79A8` | `#a00e50` |
+| anger | `#FF6B6B` | `#a01818` |
+| anticipation | `#FFEAA7` | `#6e4e00` |
 
 The `theme` object is selected from the store in every screen and component: `const t = useVeilStore(s => s.theme)`. All dynamic colours are passed inline (`style={{ color: t.text }}`). Static layout values (padding, borderRadius, flex) remain in `StyleSheet.create`. The `FadeScreen` wrapper reads `theme.bg` from the store to prevent background flash during tab transitions.
 

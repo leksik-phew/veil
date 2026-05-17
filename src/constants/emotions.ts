@@ -67,22 +67,22 @@ export const DARK_COLORS: ThemeColors = {
 
 export const LIGHT_COLORS: ThemeColors = {
   bg:             '#f5f1eb',
-  card:           'rgba(20,15,35,0.055)',
-  border:         'rgba(20,15,35,0.10)',
+  card:           'rgba(20,15,35,0.07)',
+  border:         'rgba(20,15,35,0.14)',
   accent:         '#6c5dd3',
-  accentDim:      'rgba(108,93,211,0.13)',
+  accentDim:      'rgba(108,93,211,0.12)',
   teal:           '#1a9e96',
   text:           'rgba(20,15,35,0.92)',
-  textMuted:      'rgba(20,15,35,0.55)',
-  textDim:        'rgba(20,15,35,0.32)',
-  input:          'rgba(20,15,35,0.055)',
-  chip:           'rgba(20,15,35,0.07)',
-  chipActive:     'rgba(108,93,211,0.14)',
-  chipBorderActive:'rgba(108,93,211,0.45)',
+  textMuted:      'rgba(20,15,35,0.62)',
+  textDim:        'rgba(20,15,35,0.42)',
+  input:          '#e8e4dc',
+  chip:           'rgba(20,15,35,0.09)',
+  chipActive:     'rgba(108,93,211,0.18)',
+  chipBorderActive:'rgba(108,93,211,0.60)',
   chipTextActive: '#6c5dd3',
   textOnAccent:   '#ffffff',
   wheelCenter:    '#ede9e2',
-  danger:         '#cc4040',
+  danger:         '#b32020',
 };
 
 export const getThemeColors = (mode: ThemeMode): ThemeColors =>
@@ -96,4 +96,28 @@ import { TRANSLATIONS } from '../i18n/translations';
 import type { Lang } from '../i18n/translations';
 export function getEmotionLabel(id: EmotionId, lang: Lang): string {
   return TRANSLATIONS[lang].emotions[id];
+}
+
+// Darker readable versions for use as TEXT on light backgrounds.
+// The original pastel colors (joy: #FFD93D, anticipation: #FFEAA7, etc.)
+// are invisible on the #f5f1eb background.
+const EMOTION_TEXT_COLORS_LIGHT: Record<EmotionId, string> = {
+  joy:          '#7a5800',   // dark amber
+  trust:        '#1a6b2a',   // dark green
+  fear:         '#0a6460',   // dark teal
+  surprise:     '#0a52a0',   // dark blue
+  sadness:      '#4232b0',   // dark purple
+  disgust:      '#a00e50',   // dark pink/magenta
+  anger:        '#a01818',   // dark red
+  anticipation: '#6e4e00',   // dark gold
+};
+
+/**
+ * Returns the emotion color safe for use as text.
+ * On dark theme: original vibrant color.
+ * On light theme: a darker, high-contrast variant.
+ */
+export function getEmotionColorForText(id: EmotionId, isLight: boolean): string {
+  if (!isLight) return getEmotion(id).color;
+  return EMOTION_TEXT_COLORS_LIGHT[id] ?? getEmotion(id).color;
 }

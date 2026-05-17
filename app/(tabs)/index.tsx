@@ -12,7 +12,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import PlutchikWheel from '../../src/components/PlutchikWheel';
 import { FadeScreen } from '../../src/components/FadeScreen';
-import { TRIGGERS, getEmotion, getEmotionLabel } from '../../src/constants/emotions';
+import { TRIGGERS, getEmotion, getEmotionLabel, getEmotionColorForText } from '../../src/constants/emotions';
 import { useVeilStore } from '../../src/store/useStore';
 import { TRANSLATIONS } from '../../src/i18n/translations';
 import type { EmotionId, TriggerId } from '../../src/types';
@@ -136,7 +136,7 @@ function isSameWeek(dateStr: string, now: Date) {
   return d >= sw;
 }
 
-function WeeklyDigest({ checkIns, t, lang }: { checkIns: any[]; t: any; lang: string }) {
+function WeeklyDigest({ checkIns, t, lang, isLight }: { checkIns: any[]; t: any; lang: string; isLight: boolean }) {
   const tr   = TRANSLATIONS[lang as 'en' | 'ru'].checkin;
   const now  = new Date();
   const week = checkIns.filter(c => isSameWeek(c.createdAt, now));
@@ -157,7 +157,7 @@ function WeeklyDigest({ checkIns, t, lang }: { checkIns: any[]; t: any; lang: st
         <Text style={[wd.sub, { color: t.textDim }]}>{tr.avg}</Text>
         {topEmo && (<>
           <View style={[wd.divider, { backgroundColor: t.border }]} />
-          <Text style={[wd.val, { color: topEmo.color }]}>
+          <Text style={[wd.val, { color: getEmotionColorForText(topEmo.id, isLight) }]}>
             {getEmotionLabel(topEmo.id, lang as 'en' | 'ru')}
           </Text>
           <Text style={[wd.sub, { color: t.textDim }]}>{tr.felt}</Text>
@@ -183,6 +183,7 @@ export default function CheckInScreen() {
   }));
   const tr = TRANSLATIONS[lang].checkin;
   const trTriggers = TRANSLATIONS[lang].triggers;
+  const isLight = useVeilStore(s => s.themeMode === 'light');
 
   const [step, setStep]           = useState<1 | 2>(1);
   const [sel, setSel]             = useState<EmotionId | null>(null);
@@ -225,8 +226,10 @@ export default function CheckInScreen() {
     setTimeout(() => { setSaved(false); reset(); transitionTo(1); }, 1400);
   };
 
-  const emo      = sel ? getEmotion(sel) : null;
-  const btnColor = saved ? t.teal : emo?.color ?? t.accent;
+  const emo       = sel ? getEmotion(sel) : null;
+  const emoColor   = emo ? getEmotionColorForText(emo.id, isLight) : t.accent;
+  const sliderColor = emo ? (isLight ? emoColor : emo.color) : t.accent;
+  const btnColor   = saved ? t.teal : emo?.color ?? t.accent;
 
   // Date locale
   const dateLocale = lang === 'ru' ? 'ru-RU' : 'en-US';
@@ -250,7 +253,7 @@ export default function CheckInScreen() {
                 </View>
               </View>
 
-              <WeeklyDigest checkIns={checkIns} t={t} lang={lang} />
+              <WeeklyDigest checkIns={checkIns} t={t} lang={lang} isLight={isLight} />
 
               <View style={s.wheelWrap}>
                 <PlutchikWheel selected={sel} onSelect={setSel} size={250} />
@@ -258,14 +261,14 @@ export default function CheckInScreen() {
 
               <View style={s.sliderWrap}>
                 <Text style={[s.label, { color: t.textDim }]}>{tr.intensity}</Text>
-                <IntensitySlider value={intensity} onChange={setInt} color={emo?.color ?? t.accent} t={t} />
+                <IntensitySlider value={intensity} onChange={setInt} color={sliderColor} t={t} />
               </View>
 
               <View style={s.footer}>
                 <PressBtn
                   onPress={() => { if (!sel) { Alert.alert(tr.chooseEmotion); return; } transitionTo(2); }}
                   style={[s.btn, { backgroundColor: emo?.color ?? t.accent, opacity: sel ? 1 : 0.4 }]}
-                  textStyle={[s.btnText, { color: t.textOnAccent }]}
+                  textStyle={[s.btnText, { color: isLight && emo ? '#1a1610' : t.textOnAccent }]}
                   label={tr.next} disabled={!sel}
                 />
               </View>
@@ -287,7 +290,7 @@ export default function CheckInScreen() {
                   backgroundColor: (emo?.color ?? t.accent) + '22',
                   borderColor:     (emo?.color ?? t.accent) + '55',
                 }]}>
-                  <Text style={[s.emoChipText, { color: emo?.color ?? t.accent }]}>
+                  <Text style={[s.emoChipText, { color: emo ? getEmotionColorForText(emo.id, isLight) : t.accent }]}>
                     {emo ? getEmotionLabel(emo.id, lang) : ''}  ·  {intensity}/10
                   </Text>
                 </View>
@@ -336,7 +339,7 @@ export default function CheckInScreen() {
                 <PressBtn
                   onPress={save}
                   style={[s.btn, { backgroundColor: btnColor }]}
-                  textStyle={[s.btnText, { color: t.textOnAccent }]}
+                  textStyle={[s.btnText, { color: isLight && !saved ? '#1a1610' : t.textOnAccent }]}
                   label={saved ? tr.saved : tr.liftTheVeil}
                 />
               </View>

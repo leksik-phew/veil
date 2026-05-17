@@ -9,15 +9,15 @@ import Animated, {
 import { Audio } from 'expo-av';
 import { FadeScreen } from '../../src/components/FadeScreen';
 import { useVeilStore } from '../../src/store/useStore';
-import { EMOTIONS, getEmotion, getEmotionLabel } from '../../src/constants/emotions';
+import { EMOTIONS, getEmotion, getEmotionLabel, getEmotionColorForText } from '../../src/constants/emotions';
 import { TRANSLATIONS } from '../../src/i18n/translations';
 import { dbToAmplitude, extractFeatures, classifyEmotion, featureDescription } from '../../src/engine/emotionEngine';
 import type { EmotionId } from '../../src/types';
 
 type Phase = 'idle' | 'recording' | 'processing' | 'done';
 
-function ChoiceChip({ label, active, color, onPress, chipBg, chipBorder, chipText }: {
-  label: string; active: boolean; color: string; onPress: () => void;
+function ChoiceChip({ label, active, color, activeTextColor, onPress, chipBg, chipBorder, chipText }: {
+  label: string; active: boolean; color: string; activeTextColor: string; onPress: () => void;
   chipBg: string; chipBorder: string; chipText: string;
 }) {
   const scale = useSharedValue(1);
@@ -32,7 +32,7 @@ function ChoiceChip({ label, active, color, onPress, chipBg, chipBorder, chipTex
         { backgroundColor: active ? color + '24' : chipBg, borderColor: active ? color + '80' : chipBorder },
         anim,
       ]}>
-        <Text style={[s.chipText, { color: active ? color : chipText }]}>{label}</Text>
+        <Text style={[s.chipText, { color: active ? activeTextColor : chipText }]}>{label}</Text>
       </Animated.View>
     </Pressable>
   );
@@ -61,6 +61,7 @@ export default function VoiceScreen() {
     voiceEntries: s.voiceEntries, addVoiceEntry: s.addVoiceEntry, t: s.theme, lang: s.lang,
   }));
   const tr = TRANSLATIONS[lang].voice;
+  const isLight = useVeilStore(s => s.themeMode === 'light');
 
   const [phase, setPhase]       = useState<Phase>('idle');
   const [secs, setSecs]         = useState(0);
@@ -211,14 +212,18 @@ export default function VoiceScreen() {
                   ? tr.veilHears
                   : tr.modelHeard(getEmotionLabel(result.modelEmotion, lang))}
               </Text>
-              <Text style={[s.resultEmo, { color: getEmotion(result.emotion).color }]}>
+              <Text style={[s.resultEmo, { color: getEmotionColorForText(result.emotion, isLight) }]}>
                 {getEmotionLabel(result.emotion, lang)}
               </Text>
               <Text style={[s.resultDesc, { color: t.textMuted }]}>{result.desc}</Text>
               <View style={s.choiceGrid}>
                 {EMOTIONS.map(e => (
-                  <ChoiceChip key={e.id} label={getEmotionLabel(e.id, lang)} active={e.id === result.emotion}
-                    color={e.color} onPress={() => chooseEmotion(e.id)}
+                  <ChoiceChip key={e.id}
+                    label={getEmotionLabel(e.id, lang)}
+                    active={e.id === result.emotion}
+                    color={e.color}
+                    activeTextColor={getEmotionColorForText(e.id, isLight)}
+                    onPress={() => chooseEmotion(e.id)}
                     chipBg={t.chip} chipBorder={t.border} chipText={t.textMuted} />
                 ))}
               </View>
@@ -250,7 +255,7 @@ export default function VoiceScreen() {
               return (
                 <View key={e.id} style={[s.entryRow, { borderTopColor: t.border }]}>
                   <View style={[s.entryDot, { backgroundColor: emo.color }]} />
-                  <Text style={[s.entryEmo, { color: emo.color }]}>{getEmotionLabel(e.detectedEmotion, lang)}</Text>
+                  <Text style={[s.entryEmo, { color: getEmotionColorForText(e.detectedEmotion, isLight) }]}>{getEmotionLabel(e.detectedEmotion, lang)}</Text>
                   <Text style={[s.entryMeta, { color: t.textMuted }]}>
                     {e.durationSeconds}s · {Math.round(e.confidence * 100)}%{corrected ? ` · ${tr.corrected}` : ''}
                   </Text>
