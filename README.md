@@ -1062,7 +1062,7 @@ The `veil://` scheme is already registered in `app.json`.
 - **Emotion forecast** — based on weekday, time of day, and recent trend, show a soft prediction: "Historically you feel lower energy on Monday mornings" before the user even opens the wheel
 - **Anomaly detection** — highlight days where the emotion or intensity is a significant outlier from the user's personal baseline; gentle nudge to journal more that day
 - **Correlation explorer** — interactive chart: pick any two variables (trigger × emotion, time of day × intensity, sleep × mood) and see the personal correlation score computed from local data
-- **Voice prosody trends** — track energy, stability, and tempo across all voice entries over time and visualise them as a personal acoustic fingerprint that evolves with fine-tuning
+- ✅ **Voice prosody trends** — energy, stability and tempo plotted as a smooth line chart over all voice recordings (chronological). Shows latest values with ↑↓→ vs previous entry. Subtle area fill, bezier curves, x-axis date labels. Card appears in Patterns tab after the first voice entry, with graceful empty state.
 - **Emotion transition graph** — Sankey or chord diagram showing which emotions follow which across check-ins (e.g. anticipation → joy vs anticipation → fear split by trigger)
 
 ### Check-in UX

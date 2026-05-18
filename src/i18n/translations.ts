@@ -91,6 +91,12 @@ const en = {
     avgIntensity: 'avg intensity',
     topEmotion:   'top emotion',
     onDevice:     'on-device',
+    voiceProsody:      'voice acoustic fingerprint',
+    voiceProsodySub:   'energy · stability · tempo over time',
+    voiceProsodyEmpty: 'Save 2+ voice entries to see your acoustic fingerprint',
+    prosodyEnergy:     'energy',
+    prosodyStability:  'stability',
+    prosodyTempo:      'tempo',
   },
 
   // ── Voice screen ──
@@ -278,6 +284,12 @@ const ru = {
     avgIntensity: 'средн. интенсивность',
     topEmotion:   'частая эмоция',
     onDevice:     'на устройстве',
+    voiceProsody:      'акустический отпечаток',
+    voiceProsodySub:   'энергия · стабильность · темп',
+    voiceProsodyEmpty: 'Сохрани 2+ голосовые записи, чтобы увидеть отпечаток',
+    prosodyEnergy:     'энергия',
+    prosodyStability:  'стабильность',
+    prosodyTempo:      'темп',
   },
 
   voice: {
