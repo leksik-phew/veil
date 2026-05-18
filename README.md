@@ -25,8 +25,9 @@
 13. [Getting Started](#getting-started)
 14. [Build & Deploy](#build--deploy)
 15. [Design System](#design-system)
-16. [Roadmap](#roadmap)
-17. [Privacy](#privacy)
+16. [Completed Features](#completed-features)
+17. [Roadmap](#roadmap)
+18. [Privacy](#privacy)
 
 ---
 
@@ -1050,6 +1051,16 @@ The `veil://` scheme is already registered in `app.json`.
 
 ---
 
+## Completed Features
+
+### Intelligence
+
+- **Voice prosody trends** — energy, stability and tempo plotted as a smooth line chart over all voice recordings (chronological). Shows latest values with ↑↓→ vs previous entry. Subtle area fill, bezier curves, x-axis date labels. Card appears in Patterns tab after the first voice entry, with graceful empty state.
+
+- **Emotion transition graph** — chord-like SVG diagram in the Patterns tab showing which emotions follow which across consecutive check-ins. Arcs drawn as quadratic beziers with a perpendicular-offset control point (prevents straight-line collapse for opposite-node pairs). Arc thickness (0.5–5px) and opacity (0.15–0.77) scale with transition frequency. Legend below the diagram is adaptive: ≤4 transitions → full-width rows; >4 transitions → compact 2-column grid with `flexShrink` on labels, ensuring every visible arc always has a description entry. Appears after 3+ check-ins with at least one non-self-loop transition. Fully bilingual (EN/RU).
+
+---
+
 ## Roadmap
 
 ### Platform
@@ -1062,8 +1073,6 @@ The `veil://` scheme is already registered in `app.json`.
 - **Emotion forecast** — based on weekday, time of day, and recent trend, show a soft prediction: "Historically you feel lower energy on Monday mornings" before the user even opens the wheel
 - **Anomaly detection** — highlight days where the emotion or intensity is a significant outlier from the user's personal baseline; gentle nudge to journal more that day
 - **Correlation explorer** — interactive chart: pick any two variables (trigger × emotion, time of day × intensity, sleep × mood) and see the personal correlation score computed from local data
-- ✅ **Voice prosody trends** — energy, stability and tempo plotted as a smooth line chart over all voice recordings (chronological). Shows latest values with ↑↓→ vs previous entry. Subtle area fill, bezier curves, x-axis date labels. Card appears in Patterns tab after the first voice entry, with graceful empty state.
-- **Emotion transition graph** — Sankey or chord diagram showing which emotions follow which across check-ins (e.g. anticipation → joy vs anticipation → fear split by trigger)
 
 ### Check-in UX
 - **Quick emotions** — after 30+ check-ins, surface the user's top 3 most frequent emotions as one-tap shortcuts above the wheel

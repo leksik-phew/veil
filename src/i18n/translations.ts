@@ -97,6 +97,9 @@ const en = {
     prosodyEnergy:     'energy',
     prosodyStability:  'stability',
     prosodyTempo:      'tempo',
+    emotionTransitions:      'emotion transitions',
+    emotionTransitionsSub:   'what follows what · across all check-ins',
+    emotionTransitionsEmpty: 'Save 3+ check-ins to see how your emotions flow',
   },
 
   // ── Voice screen ──
@@ -290,6 +293,9 @@ const ru = {
     prosodyEnergy:     'энергия',
     prosodyStability:  'стабильность',
     prosodyTempo:      'темп',
+    emotionTransitions:      'переходы эмоций',
+    emotionTransitionsSub:   'что за чем следует · по чекинам',
+    emotionTransitionsEmpty: 'Сохрани 3+ чекина, чтобы увидеть поток эмоций',
   },
 
   voice: {

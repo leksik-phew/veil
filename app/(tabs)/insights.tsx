@@ -1,6 +1,6 @@
 import React, { useMemo, useEffect, useRef } from 'react';
 import { View, Text, ScrollView, StyleSheet } from 'react-native';
-import Svg, { Path, Circle as SvgCircle, Line } from 'react-native-svg';
+import Svg, { Path, Circle as SvgCircle, Line, Text as SvgText } from 'react-native-svg';
 import Animated, {
   useSharedValue, useAnimatedStyle, withTiming, withDelay,
   Easing, withSpring,
@@ -8,10 +8,10 @@ import Animated, {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { FadeScreen } from '../../src/components/FadeScreen';
 import { useVeilStore } from '../../src/store/useStore';
-import { getEmotion, getEmotionLabel, getEmotionColorForText } from '../../src/constants/emotions';
+import { getEmotion, getEmotionLabel, getEmotionColorForText, EMOTIONS } from '../../src/constants/emotions';
 import { TRANSLATIONS } from '../../src/i18n/translations';
 import { buildNeuralPatterns, getPatternModelVersion, voicePatternIntensity } from '../../src/engine/patternModel';
-import type { EmotionId, VoiceEntry } from '../../src/types';
+import type { EmotionId, VoiceEntry, CheckIn } from '../../src/types';
 
 const DOW_SHORT_EN = ['M','T','W','T','F','S','S'];
 const DOW_SHORT_RU = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
@@ -334,6 +334,165 @@ const pca = StyleSheet.create({
   latestArrow:   { fontSize: 12, fontWeight: '700' },
 });
 
+// ── Emotion Transition Graph ─────────────────────────────────────────────────
+// Chord-like diagram: each check-in pair (prev → next) contributes a transition.
+// Arcs are quadratic beziers through an off-center control point; thickness and
+// opacity scale with frequency. Top-4 transitions listed below the chart.
+
+const TRANS_CX = 130, TRANS_CY = 130; // SVG center
+const TRANS_R  = 92;                   // orbit radius for emotion nodes
+const TRANS_LR = 107;                  // orbit radius for labels
+const TRANS_DR = 4.5;                  // dot radius
+
+function ePos(angleDeg: number, r = TRANS_R): { x: number; y: number } {
+  const rad = (angleDeg - 90) * Math.PI / 180;
+  return {
+    x: TRANS_CX + r * Math.cos(rad),
+    y: TRANS_CY + r * Math.sin(rad),
+  };
+}
+
+// Perpendicular-offset control point so opposite-node arcs never collapse to straight lines
+function transCtrl(fromAngleDeg: number): { cx: number; cy: number } {
+  const rad = (fromAngleDeg - 90) * Math.PI / 180;
+  // Perpendicular to the radial direction (CCW rotation)
+  const perpX = -Math.sin(rad);
+  const perpY =  Math.cos(rad);
+  return {
+    cx: TRANS_CX + perpX * 22,
+    cy: TRANS_CY + perpY * 22,
+  };
+}
+
+type TransItem = { from: EmotionId; to: EmotionId; count: number };
+
+function buildTransitions(checkIns: CheckIn[]): TransItem[] {
+  if (checkIns.length < 2) return [];
+  // Check-ins come newest-first from the store — reverse to chronological
+  const sorted = [...checkIns].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const map: Record<string, number> = {};
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const from = sorted[i].emotion;
+    const to   = sorted[i + 1].emotion;
+    if (from === to) continue;          // skip self-loops
+    const key = `${from}\u2192${to}`;
+    map[key] = (map[key] ?? 0) + 1;
+  }
+  return Object.entries(map)
+    .map(([k, count]) => {
+      const [from, to] = k.split('\u2192') as [EmotionId, EmotionId];
+      return { from, to, count };
+    })
+    .sort((a, b) => b.count - a.count);
+}
+
+function EmotionTransitionGraph({
+  checkIns, t, tr, lang,
+}: {
+  checkIns: CheckIn[];
+  t: any;
+  tr: any;
+  lang: string;
+}) {
+  const transitions = useMemo(() => buildTransitions(checkIns), [checkIns]);
+
+  if (checkIns.length < 3 || transitions.length === 0) {
+    return (
+      <Text style={{ fontSize: 13, lineHeight: 20, color: t.textMuted }}>
+        {tr.emotionTransitionsEmpty}
+      </Text>
+    );
+  }
+
+  const maxCount = Math.max(...transitions.map(x => x.count), 1);
+  const visible  = transitions.slice(0, 15); // keep chart readable
+
+  return (
+    <View>
+      <Svg width="100%" height={260} viewBox="0 0 260 260">
+        {/* Orbit guide ring */}
+        <SvgCircle
+          cx={TRANS_CX} cy={TRANS_CY} r={TRANS_R}
+          stroke={t.border} strokeWidth={0.5} fill="none"
+        />
+
+        {/* Transition arcs */}
+        {visible.map(({ from, to, count }, i) => {
+          const fp = ePos(getEmotion(from).angle);
+          const tp = ePos(getEmotion(to).angle);
+          const { cx, cy } = transCtrl(getEmotion(from).angle);
+          const sw = 0.5 + (count / maxCount) * 4.5;
+          const op = 0.15 + (count / maxCount) * 0.62;
+          return (
+            <Path
+              key={i}
+              d={`M${fp.x.toFixed(1)},${fp.y.toFixed(1)} Q${cx.toFixed(1)},${cy.toFixed(1)} ${tp.x.toFixed(1)},${tp.y.toFixed(1)}`}
+              stroke={getEmotion(from).color}
+              strokeWidth={sw}
+              fill="none"
+              opacity={op}
+              strokeLinecap="round"
+            />
+          );
+        })}
+
+        {/* Emotion dots + abbreviated labels */}
+        {EMOTIONS.map(emo => {
+          const p  = ePos(emo.angle);
+          const lp = ePos(emo.angle, TRANS_LR);
+          const norm   = ((emo.angle % 360) + 360) % 360;
+          const anchor = norm > 20 && norm < 160 ? 'start'
+                       : norm > 200 && norm < 340 ? 'end'
+                       : 'middle';
+          const shortLabel = getEmotionLabel(emo.id, lang as any).slice(0, 3);
+          return (
+            <React.Fragment key={emo.id}>
+              <SvgCircle cx={p.x} cy={p.y} r={TRANS_DR} fill={emo.color} />
+              <SvgText
+                x={lp.x} y={lp.y + 3}
+                fontSize={8}
+                fill={t.textMuted}
+                textAnchor={anchor}
+              >
+                {shortLabel}
+              </SvgText>
+            </React.Fragment>
+          );
+        })}
+      </Svg>
+
+      {/* Transitions list — one entry per arc drawn in the diagram */}
+      <View style={[etg.list, visible.length > 4 && etg.listGrid]}>
+        {visible.map(({ from, to, count }, i) => (
+          <View key={i} style={[etg.row, visible.length > 4 && etg.rowHalf]}>
+            <View style={[etg.dot, { backgroundColor: getEmotion(from).color }]} />
+            <Text style={[etg.name, { color: t.textMuted }]} numberOfLines={1}>
+              {getEmotionLabel(from, lang as any)}
+            </Text>
+            <Text style={[etg.arr, { color: t.textDim }]}>→</Text>
+            <View style={[etg.dot, { backgroundColor: getEmotion(to).color }]} />
+            <Text style={[etg.name, { color: t.textMuted }]} numberOfLines={1}>
+              {getEmotionLabel(to, lang as any)}
+            </Text>
+            <Text style={[etg.cnt, { color: t.textDim }]}>{count}×</Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+const etg = StyleSheet.create({
+  list:     { marginTop: 6 },
+  listGrid: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 8 },
+  row:      { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 7 },
+  rowHalf:  { width: '48%', marginBottom: 5 },
+  dot:      { width: 7, height: 7, borderRadius: 4 },
+  name:     { fontSize: 12, flexShrink: 1 },
+  arr:      { fontSize: 12, fontWeight: '500' },
+  cnt:      { marginLeft: 'auto', fontSize: 11, fontWeight: '600' },
+});
+
 // ── Screen ────────────────────────────────────────────────────────────────────
 export default function InsightsScreen() {
   const { checkIns, voiceEntries, t, lang } = useVeilStore(s => ({
@@ -456,6 +615,29 @@ export default function InsightsScreen() {
             {patterns.length > 0 && (
               <Text style={[s.modelTag, { color: t.textDim }]}>{getPatternModelVersion()} · {tr.onDevice}</Text>
             )}
+          </View>
+
+          {/* ── Emotion Transition Graph ── */}
+          <View style={[s.card, { backgroundColor: t.card, borderColor: t.border }]}>
+            <View style={s.prosodyHeader}>
+              <View>
+                <Text style={[s.label, { color: t.textDim, marginBottom: 2 }]}>{tr.emotionTransitions}</Text>
+                <Text style={[s.prosodySub, { color: t.textDim }]}>{tr.emotionTransitionsSub}</Text>
+              </View>
+              {checkIns.length >= 3 && (
+                <View style={[s.prosodyBadge, { backgroundColor: t.accentDim, borderColor: t.chipBorderActive }]}>
+                  <Text style={[s.prosodyBadgeText, { color: t.accent }]}>
+                    {checkIns.length}
+                  </Text>
+                </View>
+              )}
+            </View>
+            <EmotionTransitionGraph
+              checkIns={checkIns}
+              t={t}
+              tr={tr}
+              lang={lang}
+            />
           </View>
 
           {/* ── Voice Prosody Trends ── */}
