@@ -701,18 +701,34 @@ Recording phase machine: `idle → recording → processing → done → idle`. 
 
 ## Getting Started
 
-### Prerequisites
+### Prerequisites (all platforms)
 
 - **Node.js** 18 or 20 (not 22+)
-- **Expo Go** app on device (SDK 54)
-- **watchman** (macOS) — prevents `EMFILE: too many open files`
+- **Expo Go** app on your iOS or Android device (SDK 54)
+- **Git**
+
+---
+
+### macOS
+
+**1. Install Node.js via nvm**
 
 ```bash
-nvm install 20 && nvm use 20
-brew install watchman   # macOS only
+# Install nvm if you don't have it
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+source ~/.zshrc   # or ~/.bashrc
+
+nvm install 20
+nvm use 20
 ```
 
-### Install & run
+**2. Install Watchman** — prevents `EMFILE: too many open files` on macOS
+
+```bash
+brew install watchman
+```
+
+**3. Clone and run**
 
 ```bash
 git clone <your-repo-url>
@@ -723,15 +739,82 @@ npx expo start          # scan QR with Expo Go
 npx expo start --clear  # if Metro hangs or after babel changes
 ```
 
+---
+
+### Windows
+
+**1. Install Node.js**
+
+Option A — via [nvm-windows](https://github.com/coreybutler/nvm-windows/releases) (recommended, allows version switching):
+
+```powershell
+# After installing nvm-windows, open a new PowerShell/cmd window as Administrator:
+nvm install 20
+nvm use 20
+```
+
+Option B — direct installer from [nodejs.org](https://nodejs.org/) (choose the LTS 20.x line). Tick **"Add to PATH"** during setup.
+
+Verify installation:
+
+```powershell
+node -v   # should print v20.x.x
+npm -v
+```
+
+**2. Install Watchman (optional but recommended)**
+
+Watchman is optional on Windows — Metro runs without it. If you see Metro hanging or high CPU usage on large projects, install it via Chocolatey:
+
+```powershell
+# Install Chocolatey first if you don't have it (run as Administrator):
+Set-ExecutionPolicy Bypass -Scope Process -Force
+[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+
+# Then install Watchman:
+choco install watchman
+```
+
+**3. Configure Git line endings**
+
+Expo and React Native files use Unix line endings. Set this before cloning:
+
+```powershell
+git config --global core.autocrlf input
+```
+
+**4. Clone and run**
+
+```powershell
+git clone <your-repo-url>
+cd veil
+npm install --legacy-peer-deps
+
+npx expo start          # scan QR with Expo Go
+npx expo start --clear  # if Metro hangs or after babel changes
+```
+
+> **PowerShell execution policy:** if `npx` is blocked, run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` in an Administrator PowerShell window.
+
+**5. Firewall / network**
+
+On first `npx expo start`, Windows Firewall may prompt to allow Node.js network access. Click **Allow** — Expo Go on your phone connects to Metro over your local network.
+
+---
+
 ### Common errors
 
-| Error | Fix |
-|---|---|
-| `EMFILE: too many open files` | `brew install watchman` |
-| `import.meta is not supported` | check `babel.config.js` uses `babel-preset-expo` |
-| Project incompatible with Expo Go | ensure `"expo": "~54.0.33"` in package.json |
-| SQLite `no such column` | DB migration runs on boot — cold-start the app once |
-| Voice crash on first tap | grant microphone permission in iOS/Android Settings |
+| Error | Platform | Fix |
+|---|---|---|
+| `EMFILE: too many open files` | macOS | `brew install watchman` |
+| `npx` blocked by execution policy | Windows | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` |
+| `ENOENT` or path errors with spaces | Windows | Clone the repo to a path with no spaces (e.g. `C:\dev\veil`) |
+| Metro can't find device / QR won't scan | Windows | Ensure Node.js is allowed through Windows Firewall; phone and PC must be on the same Wi-Fi network |
+| `import.meta is not supported` | all | Check `babel.config.js` uses `babel-preset-expo` |
+| Project incompatible with Expo Go | all | Ensure `"expo": "~54.0.33"` in `package.json` |
+| SQLite `no such column` | all | DB migration runs on boot — cold-start the app once |
+| Voice crash on first tap | all | Grant microphone permission in iOS/Android Settings |
 
 ---
 
